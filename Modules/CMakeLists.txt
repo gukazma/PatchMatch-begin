@@ -1,0 +1,2 @@
+add_subdirectory(Libs)
+add_subdirectory(LibsConfig)
