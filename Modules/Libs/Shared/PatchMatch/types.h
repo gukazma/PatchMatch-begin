@@ -60,3 +60,4 @@ enum class CameraModelId {
 	kRadialFisheye = 9,
 	kThinPrismFisheye = 10,
 };
+

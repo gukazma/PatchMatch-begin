@@ -9,8 +9,9 @@ public:
 	Camera();
 	~Camera();
 
-	const camera_t kInvalidCameraId = std::numeric_limits<camera_t>::max();
-	const image_t kInvalidImageId = std::numeric_limits<image_t>::max();
+	// The unique identifier of the camera.
+	camera_t camera_id = kInvalidCameraId;
+
 	// The identifier of the camera model.
 	CameraModelId model_id = CameraModelId::kInvalid;
 
