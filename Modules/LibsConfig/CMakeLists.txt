@@ -1,0 +1,1 @@
+target_link_libraries(PatchMatch PUBLIC opencv_ml opencv_dnn opencv_core opencv_flann opencv_highgui)
