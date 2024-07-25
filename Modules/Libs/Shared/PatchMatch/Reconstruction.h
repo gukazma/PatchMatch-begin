@@ -2,7 +2,8 @@
 #include "Camera.h"
 #include "Image.h"
 #include <vector>
-class Reconstruction
+#include "Common/Export.h"
+class DLL_API Reconstruction
 {
 public:
 	Reconstruction();

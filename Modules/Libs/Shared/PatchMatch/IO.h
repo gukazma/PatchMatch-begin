@@ -1,5 +1,6 @@
 #pragma once
 #include "Reconstruction.h"
+#include "Common/Export.h"
 
-void ReadCamerasBinary(Reconstruction& reconstruction,
+void DLL_API ReadCamerasBinary(Reconstruction& reconstruction,
     const std::string& path);

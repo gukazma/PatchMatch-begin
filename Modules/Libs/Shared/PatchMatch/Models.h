@@ -1,5 +1,7 @@
 #pragma  once
 #include <string>
+#include <stdexcept>
+
 enum class CameraModelId {
     kInvalid = -1,
     kSimplePinhole = 0,
@@ -237,3 +239,5 @@ struct ThinPrismFisheyeCameraModel
     CAMERA_MODEL_DEFINITIONS(
         CameraModelId::kThinPrismFisheye, "THIN_PRISM_FISHEYE", 2, 2, 8)
 };
+
+size_t CameraModelNumParams(const CameraModelId model_id);
