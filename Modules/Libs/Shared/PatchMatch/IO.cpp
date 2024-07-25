@@ -65,14 +65,14 @@ void ReadImagesBinary(Reconstruction& reconstruction, const std::string& path) {
             point3D_ids.push_back(ReadBinaryLittleEndian<point3D_t>(&file));
         }
 
-       /* image.SetPoints2D(points2D);
+        image.SetPoints2D(points2D);
 
         for (point2D_t point2D_idx = 0; point2D_idx < image.NumPoints2D();
             ++point2D_idx) {
             if (point3D_ids[point2D_idx] != kInvalidPoint3DId) {
                 image.SetPoint3DForPoint2D(point2D_idx, point3D_ids[point2D_idx]);
             }
-        }*/
+        }
 
         image.SetRegistered(true);
         reconstruction.AddImage(std::move(image));

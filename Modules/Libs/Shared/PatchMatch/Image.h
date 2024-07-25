@@ -34,10 +34,10 @@
 
 #include <Eigen/Core>
 #include "Rigid3d.h"
-
-	// Class that holds information about an image. An image is the product of one
-	// camera shot at a certain location (parameterized as the pose). An image may
-	// share a camera with multiple other images, if its intrinsics are the same.
+#include "Point2D.h"
+// Class that holds information about an image. An image is the product of one
+// camera shot at a certain location (parameterized as the pose). An image may
+// share a camera with multiple other images, if its intrinsics are the same.
 class Image {
 public:
 	Image();
@@ -72,6 +72,14 @@ public:
 	// Extract the viewing direction of the image.
 	Eigen::Vector3d ViewingDirection() const;
 
+	// Get the number of image points.
+	inline point2D_t NumPoints2D() const;
+
+	void SetPoints2D(const std::vector<Eigen::Vector2d>& points);
+	void SetPoints2D(const std::vector<struct Point2D>& points);
+
+	void SetPoint3DForPoint2D(point2D_t point2D_idx, point3D_t point3D_id);
+
 private:
 	// Identifier of the image, if not specified `kInvalidImageId`.
 	image_t image_id_;
@@ -88,6 +96,12 @@ private:
 
 	// The pose of the image, defined as the transformation from world to camera.
 	Rigid3d cam_from_world_;
+
+	// The number of 3D points the image observes, i.e. the sum of its `points2D`
+  // where `point3D_id != kInvalidPoint3DId`.
+	point2D_t num_points3D_;
+
+	std::vector<struct Point2D> points2D_;
 };
 
 	////////////////////////////////////////////////////////////////////////////////
@@ -122,3 +136,6 @@ const Rigid3d& Image::CamFromWorld() const { return cam_from_world_; }
 
 Rigid3d& Image::CamFromWorld() { return cam_from_world_; }
 
+point2D_t Image::NumPoints2D() const {
+	return static_cast<point2D_t>(points2D_.size());
+}
