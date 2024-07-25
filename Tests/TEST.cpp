@@ -4,4 +4,5 @@ TEST(MYTEST0, A)
 {
 	Reconstruction reconstruction;
 	ReadCamerasBinary(reconstruction, "C:/projects/colmap1/sparse/0/cameras.bin");
+	ReadImagesBinary(reconstruction, "C:/projects/colmap1/sparse/0/images.bin");
 }

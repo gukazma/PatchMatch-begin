@@ -3,6 +3,7 @@
   "version-string": "latest",
   "dependencies": [
     "gtest",
-    "opencv"
+    "opencv",
+    "eigen3"
   ]
 }

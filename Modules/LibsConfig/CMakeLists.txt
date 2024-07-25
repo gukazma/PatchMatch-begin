@@ -1,1 +1,4 @@
-target_link_libraries(PatchMatch PUBLIC opencv_ml opencv_dnn opencv_core opencv_flann opencv_highgui)
+target_link_libraries(PatchMatch PUBLIC 
+Eigen3::Eigen
+opencv_ml opencv_dnn opencv_core opencv_flann opencv_highgui
+)
