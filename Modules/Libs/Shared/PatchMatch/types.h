@@ -44,20 +44,3 @@ const image_pair_t kInvalidImagePairId =
 std::numeric_limits<image_pair_t>::max();
 const point2D_t kInvalidPoint2DIdx = std::numeric_limits<point2D_t>::max();
 const point3D_t kInvalidPoint3DId = std::numeric_limits<point3D_t>::max();
-
-
-enum class CameraModelId {
-	kInvalid = -1,
-	kSimplePinhole = 0,
-	kPinhole = 1,
-	kSimpleRadial = 2,
-	kRadial = 3,
-	kOpenCV = 4,
-	kOpenCVFisheye = 5,
-	kFullOpenCV = 6,
-	kFOV = 7,
-	kSimpleRadialFisheye = 8,
-	kRadialFisheye = 9,
-	kThinPrismFisheye = 10,
-};
-

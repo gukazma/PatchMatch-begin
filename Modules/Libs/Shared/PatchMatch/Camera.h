@@ -1,5 +1,6 @@
 #pragma once
 #include "types.h"
+#include "Models.h"
 #include  <vector>
 class Camera
 {
