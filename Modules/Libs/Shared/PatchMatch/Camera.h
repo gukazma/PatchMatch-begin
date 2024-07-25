@@ -27,7 +27,9 @@ public:
 	// Whether there is a safe prior for the focal length,
 	// e.g. manually provided or extracted from EXIF
 	bool has_prior_focal_length = false;
-
+	bool VerifyParams() const {
+		return CameraModelVerifyParams(model_id, params);
+	}
 private:
 
 };

@@ -16,6 +16,12 @@ typedef unsigned __int64 uint64_t;
 #include <cstdint>
 #endif
 #include <limits>
+
+#ifndef THROW_CHECK
+#define THROW_CHECK(condition) condition
+#endif // !THROW_CHECK
+
+
 ////////////////////////////////////////////////////////////////////////////////
 // Index types, determines the maximum number of objects.
 ////////////////////////////////////////////////////////////////////////////////

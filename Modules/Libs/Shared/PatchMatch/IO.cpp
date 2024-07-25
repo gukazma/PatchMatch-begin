@@ -16,7 +16,7 @@ void ReadCamerasBinary(Reconstruction& reconstruction, const std::string& path)
         camera.height = ReadBinaryLittleEndian<uint64_t>(&file);
         camera.params.resize(CameraModelNumParams(camera.model_id), 0.);
         ReadBinaryLittleEndian<double>(&file, &camera.params);
-        //THROW_CHECK(camera.VerifyParams());
-        //reconstruction.AddCamera(std::move(camera));
+        camera.VerifyParams();
+        reconstruction.AddCamera(std::move(camera));
     }
 }

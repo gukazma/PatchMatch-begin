@@ -1,7 +1,7 @@
 #pragma  once
 #include <string>
 #include <stdexcept>
-
+#include <vector>
 enum class CameraModelId {
     kInvalid = -1,
     kSimplePinhole = 0,
@@ -241,3 +241,6 @@ struct ThinPrismFisheyeCameraModel
 };
 
 size_t CameraModelNumParams(const CameraModelId model_id);
+
+bool CameraModelVerifyParams(const CameraModelId model_id,
+    const std::vector<double>& params);
