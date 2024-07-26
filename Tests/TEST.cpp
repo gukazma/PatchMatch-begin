@@ -57,6 +57,11 @@ TEST(PatchMatch, RERUN)
         rerun::Pinhole::from_focal_length_and_resolution({ 500.0, 500.0 }, { 640.0, 480.0 })
     );
 
+    rec.log(
+        "world/camera",
+        rerun::Transform3D({ 1,2,0 })
+        );
+
     const Eigen::Vector3f camera_position{ 0.0, -1.0, 0.0 };
     Eigen::Matrix3f camera_orientation;
     // clang-format off
@@ -80,6 +85,7 @@ TEST(PatchMatch, RERUN)
 
     // Rerun expects RGB format
     cv::cvtColor(img, img, cv::COLOR_BGR2RGB);
+    rec.log("world/camera", rerun::Image(tensor_shape(img), rerun::TensorBuffer::u8(img)));
 
     // Log image to rerun using the tensor buffer adapter defined in `collection_adapters.hpp`.
     rec.log("image0", rerun::Image(tensor_shape(img), rerun::TensorBuffer::u8(img)));
@@ -87,4 +93,6 @@ TEST(PatchMatch, RERUN)
     // Or by passing a pointer to the image data.
     // The pointer cast here is redundant since `data` is already uint8_t in this case, but if you have e.g. a float image it may be necessary to cast to float*.
     rec.log("image1", rerun::Image(tensor_shape(img), reinterpret_cast<const uint8_t*>(img.data)));
+
+
 }
