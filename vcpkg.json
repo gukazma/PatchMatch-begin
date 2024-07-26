@@ -7,6 +7,8 @@
     "eigen3",
     "freeimage",
     "boost",
-    "arrow"
+    "arrow",
+    "glog",
+    "colmap"
   ]
 }

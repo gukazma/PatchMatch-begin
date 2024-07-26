@@ -46,6 +46,9 @@ endif()
 find_package(OpenCV CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
 find_package(freeimage CONFIG REQUIRED)
+find_package(glog CONFIG REQUIRED)
+find_package(COLMAP REQUIRED)
+
 set(RERUN_DOWNLOAD_AND_BUILD_ARROW OFF)
 add_subdirectory(External/rerun_cpp_sdk_0_17_0)
 

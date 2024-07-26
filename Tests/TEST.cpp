@@ -1,5 +1,4 @@
 #include <gtest/gtest.h>
-#include "PatchMatch/IO.h"
 #include <rerun.hpp>
 
 #include <iostream>
@@ -13,12 +12,12 @@
 #include <rerun.hpp>
 
 #include "collection_adapters.hpp"
-
+#include <colmap/scene/reconstruction.h>
 TEST(PatchMatch, IO)
 {
-	Reconstruction reconstruction;
-	ReadCamerasBinary(reconstruction, "C:/projects/colmap1/sparse/0/cameras.bin");
-	ReadImagesBinary(reconstruction, "C:/projects/colmap1/sparse/0/images.bin");
+    colmap::Reconstruction reconstruction;
+    reconstruction.ReadBinary("C:\\projects\\colmap1\\sparse\\0");
+
 }
 
 std::vector<Eigen::Vector3f> generate_random_points_vector(int num_points) {
