@@ -85,7 +85,58 @@ if(MSVC AND BUILD_SHARED_LIBS)
     # is a shared library one
     target_compile_definitions(rerun_sdk PUBLIC RERUN_SDK_COMPILED_AS_SHARED_LIBRARY)
 endif()
+# ------------------------------------------------------------------------------
+# Setup rerun_c dependency if it wasn't set up already.
+if(NOT TARGET rerun_c)
+    add_library(rerun_c STATIC IMPORTED GLOBAL)
 
+    # Inside the repo build ourselves, otherwise default to a local `lib` folder.
+    set(RERUN_C_DEFAULT_LIB_DIR ${CMAKE_CURRENT_SOURCE_DIR}/lib/)
+
+    if(APPLE)
+        if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
+            set(RERUN_C_LIB_DEFAULT ${RERUN_C_DEFAULT_LIB_DIR}/librerun_c__macos_x64.a)
+        elseif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64" OR "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64")
+            set(RERUN_C_LIB_DEFAULT ${RERUN_C_DEFAULT_LIB_DIR}/librerun_c__macos_arm64.a)
+        else()
+            message(WARNING "Unknown architecture ${CMAKE_SYSTEM_PROCESSOR}, can't find rerun_c library.")
+        endif()
+    elseif(UNIX) # if(LINUX) # CMake 3.25
+        if("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "x86_64")
+            set(RERUN_C_LIB_DEFAULT ${RERUN_C_DEFAULT_LIB_DIR}/librerun_c__linux_x64.a)
+        elseif("${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "arm64" OR "${CMAKE_SYSTEM_PROCESSOR}" STREQUAL "aarch64")
+            set(RERUN_C_LIB_DEFAULT ${RERUN_C_DEFAULT_LIB_DIR}/librerun_c__linux_arm64.a)
+        else()
+            message(WARNING "Unknown architecture ${CMAKE_SYSTEM_PROCESSOR}, can't find rerun_c library.")
+        endif()
+    elseif(WIN32)
+        # TODO(andreas): Arm support.
+        set(RERUN_C_LIB_DEFAULT ${RERUN_C_DEFAULT_LIB_DIR}/rerun_c__win_x64.lib)
+    else()
+        message(WARNING "Unsupported platform ${RERUN_C_LIB_DEFAULT}, can't find rerun_c library.")
+    endif()
+
+    set(RERUN_C_LIB ${RERUN_C_LIB_DEFAULT} CACHE PATH "\
+        Where to find the rerun_c library.\n\
+        If not specified, a local rerun_c with the current system architecture will be used."
+    )
+
+    if("${RERUN_C_LIB}" STREQUAL "")
+        message(FATAL_ERROR "RERUN_C_LIB is not set.")
+    endif()
+
+    set_target_properties(rerun_c PROPERTIES IMPORTED_LOCATION ${RERUN_C_LIB})
+endif()
+
+if(APPLE)
+    target_link_libraries(rerun_c INTERFACE "-framework CoreFoundation" "-framework IOKit")
+elseif(UNIX) # if(LINUX) # CMake 3.25
+    target_link_libraries(rerun_c INTERFACE "-lm -ldl -pthread")
+elseif(WIN32)
+    target_link_libraries(rerun_c INTERFACE ws2_32.dll Bcrypt.dll Userenv.dll ntdll.dll)
+endif()
+
+target_link_libraries(rerun_sdk PRIVATE rerun_c)
 # -----------------------------------------------------------------------------
 # Installation.
 set(RERUN_SDK_INSTALL_CMAKE_DIR "lib/cmake/rerun_sdk")
