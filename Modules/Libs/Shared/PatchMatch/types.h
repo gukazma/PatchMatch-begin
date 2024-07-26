@@ -61,3 +61,22 @@ namespace Eigen {
 	typedef Eigen::Matrix<double, 6, 1> Vector6d;
 
 }  // namespace Eigen
+
+template <typename T>
+class span {
+	T* ptr_;
+	const size_t size_;
+
+public:
+	span(T* ptr, size_t len) noexcept : ptr_{ ptr }, size_{ len } {}
+
+	T& operator[](size_t i) noexcept { return ptr_[i]; }
+	T const& operator[](size_t i) const noexcept { return ptr_[i]; }
+
+	size_t size() const noexcept { return size_; }
+
+	T* begin() noexcept { return ptr_; }
+	T* end() noexcept { return ptr_ + size_; }
+	const T* begin() const noexcept { return ptr_; }
+	const T* end() const noexcept { return ptr_ + size_; }
+};

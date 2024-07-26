@@ -45,6 +45,9 @@ endif()
 
 find_package(OpenCV CONFIG REQUIRED)
 find_package(Eigen3 CONFIG REQUIRED)
+find_package(freeimage CONFIG REQUIRED)
+set(RERUN_DOWNLOAD_AND_BUILD_ARROW OFF)
+add_subdirectory(External/rerun_cpp_sdk_0_17_0)
 
 add_subdirectory(Modules)
 add_subdirectory(Apps)

@@ -4,6 +4,9 @@
   "dependencies": [
     "gtest",
     "opencv",
-    "eigen3"
+    "eigen3",
+    "freeimage",
+    "boost",
+    "arrow"
   ]
 }
