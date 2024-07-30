@@ -17,7 +17,13 @@ set_target_properties(${TARGET_NAME} PROPERTIES VS_DEBUGGER_COMMAND_ARGUMENTS "$
 
 target_link_libraries(${TARGET_NAME} 
       PRIVATE
-            GTest::gtest GTest::gtest_main PatchMatch
+            GTest::gtest GTest::gtest_main
+            Eigen3::Eigen
+opencv_ml opencv_dnn opencv_core opencv_flann opencv_highgui
+freeimage::FreeImage freeimage::FreeImagePlus
+rerun_sdk
+glog::glog
+colmap::colmap
 )
 
 target_include_directories(

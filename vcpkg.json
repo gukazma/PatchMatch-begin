@@ -9,6 +9,12 @@
     "boost",
     "arrow",
     "glog",
-    "colmap"
+    {
+      "name": "colmap",
+      "features": [
+        "cuda",
+        "cuda-redist"
+      ]
+    }
   ]
 }

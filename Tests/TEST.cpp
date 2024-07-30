@@ -13,10 +13,31 @@
 
 #include "collection_adapters.hpp"
 #include <colmap/scene/reconstruction.h>
+#include <colmap/mvs/patch_match.h>
+#include <colmap/controllers/option_manager.h>
+#include <colmap/mvs/workspace.h>
+#include <colmap/controllers/automatic_reconstruction.h>
 TEST(PatchMatch, IO)
 {
     colmap::Reconstruction reconstruction;
     reconstruction.ReadBinary("C:\\projects\\colmap1\\sparse\\0");
+}
+
+
+TEST(PatchMatch, RunPatchMatchStereo)
+{
+    std::string workspace_path = "C:/projects/colmap1/dense/0";
+    std::string workspace_format = "COLMAP";
+    std::string pmvs_option_name = "option-all";
+    std::string config_path;
+    colmap::OptionManager  options;
+    
+    options.AddPatchMatchStereoOptions();
+    options.patch_match_stereo->geom_consistency = true;
+    colmap::mvs::PatchMatchController controller(*options.patch_match_stereo, workspace_path, workspace_format, pmvs_option_name);
+    
+    controller.Start();
+    controller.Wait();
 
 }
 
