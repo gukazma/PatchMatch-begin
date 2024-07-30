@@ -17,6 +17,8 @@ get_filename_component(ROOT_NAME ${CMAKE_SOURCE_DIR} NAME)
 message("Configure project: ${ROOT_NAME}")
 project(${ROOT_NAME} VERSION 0.1 LANGUAGES CXX CUDA)
 
+set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO ${CMAKE_CUDA_FLAGS_RELWITHDEBINFO} "-g -G")
+
 option(ENABLE_DOCS "Enable doxygen docs" ON)
 option(ENABLE_QTAPP "Enable config Qt app" OFF)
 

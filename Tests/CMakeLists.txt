@@ -24,7 +24,8 @@ freeimage::FreeImage freeimage::FreeImagePlus
 rerun_sdk
 glog::glog
 colmap::colmap
-PatchMatch
+# PatchMatch
+colmap
 )
 
 target_include_directories(
@@ -36,3 +37,5 @@ add_test(
     NAME ${TARGET_NAME}
     COMMAND ${TARGET_NAME}
 )
+
+set_target_properties(${TARGET_NAME} PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
