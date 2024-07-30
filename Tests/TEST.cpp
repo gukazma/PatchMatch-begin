@@ -17,6 +17,8 @@
 #include <colmap/controllers/option_manager.h>
 #include <colmap/mvs/workspace.h>
 #include <colmap/controllers/automatic_reconstruction.h>
+
+#include <PatchMatch/PatchMatch.h>
 TEST(PatchMatch, IO)
 {
     colmap::Reconstruction reconstruction;
@@ -26,7 +28,9 @@ TEST(PatchMatch, IO)
 
 TEST(PatchMatch, RunPatchMatchStereo)
 {
-    std::string workspace_path = "C:/projects/colmap1/dense/0";
+    PatchMatch patchMatch;
+    patchMatch.Run();
+    /*std::string workspace_path = "C:/projects/colmap1/dense/0";
     std::string workspace_format = "COLMAP";
     std::string pmvs_option_name = "option-all";
     std::string config_path;
@@ -37,7 +41,7 @@ TEST(PatchMatch, RunPatchMatchStereo)
     colmap::mvs::PatchMatchController controller(*options.patch_match_stereo, workspace_path, workspace_format, pmvs_option_name);
     
     controller.Start();
-    controller.Wait();
+    controller.Wait();*/
 
 }
 
