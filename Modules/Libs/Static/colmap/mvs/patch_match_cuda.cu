@@ -34,12 +34,21 @@
 #include "colmap/util/cudacc.h"
 #include "colmap/util/logging.h"
 
+#include <crt/host_defines.h>
 #include <algorithm>
 #include <cfloat>
 #include <cmath>
 #include <cstdint>
 #include <sstream>
-
+#include <cuda_runtime.h>
+#include <cuda.h>
+#include <cuda_runtime_api.h>
+#include <texture_indirect_functions.h>
+#include <crt/math_functions.hpp>
+#include <crt/common_functions.h>
+#include <cuda_runtime.h>
+#include <stdio.h>
+#include <device_launch_parameters.h>
 // The number of threads per Cuda thread. Warning: Do not change this value,
 // since the templated window sizes rely on this value.
 #define THREADS_PER_BLOCK 32
