@@ -32,7 +32,7 @@ namespace GU
 
         workspace_ = std::make_unique<colmap::mvs::CachedWorkspace>(workspace_options);
         auto image = workspace_->GetModel().images[0];
-        auto depth_ranges_ = workspace_->GetModel().ComputeDepthRanges();
+        depth_ranges_ = workspace_->GetModel().ComputeDepthRanges();
 
 
         const auto& model = workspace_->GetModel();
@@ -205,6 +205,98 @@ namespace GU
         if (colmap::ExistsFile(depth_map_path) && colmap::ExistsFile(normal_map_path)) {
             return;
         }
+
+        colmap::PrintHeading1(colmap::StringPrintf("Processing view %d / %d for %s",
+            0,
+            problems_.size(),
+            image_name.c_str()));
+
+        auto patch_match_options = options_;
+
+        if (patch_match_options.depth_min < 0 || patch_match_options.depth_max < 0) {
+            patch_match_options.depth_min =
+                depth_ranges_.at(problem.ref_image_idx).first;
+            patch_match_options.depth_max =
+                depth_ranges_.at(problem.ref_image_idx).second;
+            CHECK(patch_match_options.depth_min > 0 &&
+                patch_match_options.depth_max > 0)
+                << " - You must manually set the minimum and maximum depth, since no "
+                "sparse model is provided in the workspace.";
+        }
+
+        patch_match_options.gpu_index = std::to_string(gpu_index);
+
+        if (patch_match_options.sigma_spatial <= 0.0f) {
+            patch_match_options.sigma_spatial = patch_match_options.window_radius;
+        }
+
+        std::vector<colmap::mvs::Image> images = model.images;
+        std::vector<colmap::mvs::DepthMap> depth_maps;
+        std::vector<colmap::mvs::NormalMap> normal_maps;
+        if (options_.geom_consistency) {
+            depth_maps.resize(model.images.size());
+            normal_maps.resize(model.images.size());
+        }
+
+        problem.images = &images;
+        problem.depth_maps = &depth_maps;
+        problem.normal_maps = &normal_maps;
+
+        {
+            // Collect all used images in current problem.
+            std::unordered_set<int> used_image_idxs(problem.src_image_idxs.begin(),
+                problem.src_image_idxs.end());
+            used_image_idxs.insert(problem.ref_image_idx);
+
+            patch_match_options.filter_min_num_consistent =
+                std::min(static_cast<int>(used_image_idxs.size()) - 1,
+                    patch_match_options.filter_min_num_consistent);
+
+            // Only access workspace from one thread at a time and only spawn resample
+            // threads from one master thread at a time.
+            //std::unique_lock<std::mutex> lock(workspace_mutex_);
+
+            LOG(INFO) << "Reading inputs...";
+            std::vector<int> src_image_idxs;
+            for (const auto image_idx : used_image_idxs) {
+                std::string image_path = workspace_->GetBitmapPath(image_idx);
+                std::string depth_path = workspace_->GetDepthMapPath(image_idx);
+                std::string normal_path = workspace_->GetNormalMapPath(image_idx);
+
+                if (!colmap::ExistsFile(image_path) ||
+                    (options_.geom_consistency && !colmap::ExistsFile(depth_path)) ||
+                    (options_.geom_consistency && !colmap::ExistsFile(normal_path))) {
+                    if (options_.allow_missing_files) {
+                        LOG(WARNING) << colmap::StringPrintf(
+                            "Skipping source image %d: %s for missing "
+                            "image or depth/normal map",
+                            image_idx,
+                            model.GetImageName(image_idx).c_str());
+                        continue;
+                    }
+                    else {
+                        LOG(ERROR) << colmap::StringPrintf(
+                            "Missing image or map dependency for image %d: %s",
+                            image_idx,
+                            model.GetImageName(image_idx).c_str());
+                    }
+                }
+
+                if (image_idx != problem.ref_image_idx) {
+                    src_image_idxs.push_back(image_idx);
+                }
+                images.at(image_idx).SetBitmap(workspace_->GetBitmap(image_idx));
+                if (options_.geom_consistency) {
+                    depth_maps.at(image_idx) = workspace_->GetDepthMap(image_idx);
+                    normal_maps.at(image_idx) = workspace_->GetNormalMap(image_idx);
+                }
+            }
+            problem.src_image_idxs = src_image_idxs;
+        }
+
+        problem.Print();
+        patch_match_options.Print();
+
 
         const int size = 10;
         float* h_input, * h_output;  // Host arrays

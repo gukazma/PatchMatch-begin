@@ -29,6 +29,7 @@ TEST(PatchMatch, MyPatchmatch)
     GU::PatchMatch patchMatch;
     GU::PatchMatch::Options options;
     options.workingspace = "C:\\projects\\colmap1\\dense\\0";
+    options.geom_consistency = false;
     patchMatch.Init(options);
     patchMatch.Run();
 }
