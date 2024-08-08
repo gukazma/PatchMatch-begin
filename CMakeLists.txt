@@ -18,6 +18,7 @@ message("Configure project: ${ROOT_NAME}")
 project(${ROOT_NAME} VERSION 0.1 LANGUAGES CXX CUDA)
 
 set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO ${CMAKE_CUDA_FLAGS_RELWITHDEBINFO} "-g -G")
+set(CMAKE_CUDA_FLAGS_DEBUG ${CMAKE_CUDA_FLAGS_DEBUG} "-g -G")
 
 option(ENABLE_DOCS "Enable doxygen docs" ON)
 option(ENABLE_QTAPP "Enable config Qt app" OFF)
