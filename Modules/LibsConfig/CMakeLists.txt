@@ -6,7 +6,7 @@ colmap::colmap
 )
 
 set_target_properties(PatchMatch PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
-
+set_target_properties(PatchMatch PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
 target_link_libraries(colmap PUBLIC 
 Eigen3::Eigen

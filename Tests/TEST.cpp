@@ -17,30 +17,38 @@
 #include <colmap/controllers/option_manager.h>
 #include <colmap/mvs/workspace.h>
 #include <colmap/controllers/automatic_reconstruction.h>
-
+#include <PatchMatch/PatchMatch.h>
 TEST(PatchMatch, IO)
 {
     colmap::Reconstruction reconstruction;
     reconstruction.ReadBinary("C:\\projects\\colmap1\\sparse\\0");
 }
 
-
-TEST(PatchMatch, RunPatchMatchStereo)
+TEST(PatchMatch, MyPatchmatch)
 {
-    std::string workspace_path = "C:/projects/colmap1/dense/0";
-    std::string workspace_format = "COLMAP";
-    std::string pmvs_option_name = "option-all";
-    std::string config_path;
-    colmap::OptionManager  options;
-    
-    options.AddPatchMatchStereoOptions();
-    options.patch_match_stereo->geom_consistency = true;
-    colmap::mvs::PatchMatchController controller(*options.patch_match_stereo, workspace_path, workspace_format, pmvs_option_name);
-    
-    controller.Start();
-    controller.Wait();
-
+    PatchMatch patchMatch;
+    PatchMatch::Options options;
+    options.workingspace = "C:\\projects\\colmap1";
+    patchMatch.Init(options);
 }
+
+
+//TEST(PatchMatch, RunPatchMatchStereo)
+//{
+//    std::string workspace_path = "C:/projects/colmap1/dense/0";
+//    std::string workspace_format = "COLMAP";
+//    std::string pmvs_option_name = "option-all";
+//    std::string config_path;
+//    colmap::OptionManager  options;
+//    
+//    options.AddPatchMatchStereoOptions();
+//    options.patch_match_stereo->geom_consistency = true;
+//    colmap::mvs::PatchMatchController controller(*options.patch_match_stereo, workspace_path, workspace_format, pmvs_option_name);
+//    
+//    controller.Start();
+//    controller.Wait();
+//
+//}
 
 std::vector<Eigen::Vector3f> generate_random_points_vector(int num_points) {
     std::vector<Eigen::Vector3f> points(num_points);

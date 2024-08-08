@@ -3,7 +3,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <device_launch_parameters.h>
-
+#include <colmap/mvs/workspace.h>
 __global__ void squareKernel(float* input, float* output, int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
 
@@ -12,6 +12,23 @@ __global__ void squareKernel(float* input, float* output, int size) {
     }
 }
 
+
+void PatchMatch::Init(Options options_)
+{
+    colmap::mvs::Workspace::Options workspace_options;
+
+
+    workspace_options.max_image_size = 1000;
+    workspace_options.image_as_rgb = false;
+    workspace_options.cache_size = 32;
+     workspace_options.workspace_path = options_.workingspace;
+    workspace_options.workspace_format = "COLMAP";
+    workspace_options.input_type = "photometric";
+
+    auto workspace_ = std::make_unique<colmap::mvs::CachedWorkspace>(workspace_options);
+
+    auto depth_ranges_ = workspace_->GetModel().ComputeDepthRanges();
+}
 
 void PatchMatch::Run()
 {

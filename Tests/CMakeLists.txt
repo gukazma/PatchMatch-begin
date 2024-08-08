@@ -24,8 +24,7 @@ freeimage::FreeImage freeimage::FreeImagePlus
 rerun_sdk
 glog::glog
 colmap::colmap
-# PatchMatch
-colmap
+PatchMatch
 )
 
 target_include_directories(
