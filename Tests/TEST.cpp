@@ -26,10 +26,11 @@ TEST(PatchMatch, IO)
 
 TEST(PatchMatch, MyPatchmatch)
 {
-    PatchMatch patchMatch;
-    PatchMatch::Options options;
-    options.workingspace = "C:\\projects\\colmap1";
+    GU::PatchMatch patchMatch;
+    GU::PatchMatch::Options options;
+    options.workingspace = "C:\\projects\\colmap1\\dense\\0";
     patchMatch.Init(options);
+    patchMatch.Run();
 }
 
 
