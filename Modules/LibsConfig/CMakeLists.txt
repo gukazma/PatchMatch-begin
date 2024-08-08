@@ -18,4 +18,4 @@ colmap::colmap
 set_target_properties(colmap PROPERTIES CUDA_SEPARABLE_COMPILATION ON)
 set_target_properties(colmap PROPERTIES CUDA_RESOLVE_DEVICE_SYMBOLS ON)
 
-target_compile_definitions(colmap PUBLIC __CUDACC__)
+target_compile_definitions(colmap PRIVATE __CUDACC__)
