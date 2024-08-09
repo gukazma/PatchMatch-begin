@@ -21,116 +21,32 @@ namespace GU
 
 	void PatchMatchHelper::Run()
 	{
-        const auto& model = m_workspace->GetModel();
-        auto& problem = m_problems.at(0);
-        const int gpu_index = 0;
-        CHECK_GE(gpu_index, -1);
-        const std::string& stereo_folder = m_workspace->GetOptions().stereo_folder;
-        const std::string output_type = "geometric";
-        const std::string image_name = model.GetImageName(problem.ref_image_idx);
-        const std::string file_name =
-            colmap::StringPrintf("%s.%s.bin", image_name.c_str(), output_type.c_str());
-        const std::string depth_map_path =
-            colmap::JoinPaths(m_options.workingspace, stereo_folder, "depth_maps", file_name);
-        const std::string normal_map_path =
-            colmap::JoinPaths(m_options.workingspace, stereo_folder, "normal_maps", file_name);
-        const std::string consistency_graph_path = colmap::JoinPaths(
-            m_options.workingspace, stereo_folder, "consistency_graphs", file_name);
+        m_threadpool = std::make_unique<colmap::ThreadPool>(m_gpuIndices.size());
 
-        if (colmap::ExistsFile(depth_map_path) && colmap::ExistsFile(normal_map_path)) {
-            return;
-        }
-
-        colmap::PrintHeading1(colmap::StringPrintf("Processing view %d / %d for %s",
-            0,
-            m_problems.size(),
-            image_name.c_str()));
-
-        auto patch_match_options = m_options;
-
-        if (patch_match_options.depth_min < 0 || patch_match_options.depth_max < 0) {
-            patch_match_options.depth_min =
-                m_depthRanges.at(problem.ref_image_idx).first;
-            patch_match_options.depth_max =
-                m_depthRanges.at(problem.ref_image_idx).second;
-            CHECK(patch_match_options.depth_min > 0 &&
-                patch_match_options.depth_max > 0)
-                << " - You must manually set the minimum and maximum depth, since no "
-                "sparse model is provided in the workspace.";
-        }
-
-        patch_match_options.gpu_index = std::to_string(gpu_index);
-
-        if (patch_match_options.sigma_spatial <= 0.0f) {
-            patch_match_options.sigma_spatial = patch_match_options.window_radius;
-        }
-
-        std::vector<colmap::mvs::Image> images = model.images;
-        std::vector<colmap::mvs::DepthMap> depth_maps;
-        std::vector<colmap::mvs::NormalMap> normal_maps;
+        // If geometric consistency is enabled, then photometric output must be
+        // computed first for all images without filtering.
         if (m_options.geom_consistency) {
-            depth_maps.resize(model.images.size());
-            normal_maps.resize(model.images.size());
-        }
+            auto photometric_options = m_options;
+            photometric_options.geom_consistency = false;
+            photometric_options.filter = false;
 
-        problem.images = &images;
-        problem.depth_maps = &depth_maps;
-        problem.normal_maps = &normal_maps;
-
-        {
-            // Collect all used images in current problem.
-            std::unordered_set<int> used_image_idxs(problem.src_image_idxs.begin(),
-                problem.src_image_idxs.end());
-            used_image_idxs.insert(problem.ref_image_idx);
-
-            patch_match_options.filter_min_num_consistent =
-                std::min(static_cast<int>(used_image_idxs.size()) - 1,
-                    patch_match_options.filter_min_num_consistent);
-
-            // Only access workspace from one thread at a time and only spawn resample
-            // threads from one master thread at a time.
-            //std::unique_lock<std::mutex> lock(workspace_mutex_);
-
-            LOG(INFO) << "Reading inputs...";
-            std::vector<int> src_image_idxs;
-            for (const auto image_idx : used_image_idxs) {
-                std::string image_path = m_workspace->GetBitmapPath(image_idx);
-                std::string depth_path = m_workspace->GetDepthMapPath(image_idx);
-                std::string normal_path = m_workspace->GetNormalMapPath(image_idx);
-
-                if (!colmap::ExistsFile(image_path) ||
-                    (m_options.geom_consistency && !colmap::ExistsFile(depth_path)) ||
-                    (m_options.geom_consistency && !colmap::ExistsFile(normal_path))) {
-                    if (m_options.allow_missing_files) {
-                        LOG(WARNING) << colmap::StringPrintf(
-                            "Skipping source image %d: %s for missing "
-                            "image or depth/normal map",
-                            image_idx,
-                            model.GetImageName(image_idx).c_str());
-                        continue;
-                    }
-                    else {
-                        LOG(ERROR) << colmap::StringPrintf(
-                            "Missing image or map dependency for image %d: %s",
-                            image_idx,
-                            model.GetImageName(image_idx).c_str());
-                    }
-                }
-
-                if (image_idx != problem.ref_image_idx) {
-                    src_image_idxs.push_back(image_idx);
-                }
-                images.at(image_idx).SetBitmap(m_workspace->GetBitmap(image_idx));
-                if (m_options.geom_consistency) {
-                    depth_maps.at(image_idx) = m_workspace->GetDepthMap(image_idx);
-                    normal_maps.at(image_idx) = m_workspace->GetNormalMap(image_idx);
-                }
+            for (size_t problem_idx = 0; problem_idx < m_problems.size();
+                ++problem_idx) {
+                m_threadpool->AddTask(&PatchMatchHelper::ProcessProblem,
+                    this,
+                    photometric_options,
+                    problem_idx);
             }
-            problem.src_image_idxs = src_image_idxs;
+
+            m_threadpool->Wait();
         }
 
-        problem.Print();
-        patch_match_options.Print();
+        for (size_t problem_idx = 0; problem_idx < m_problems.size(); ++problem_idx) {
+            m_threadpool->AddTask(
+                &PatchMatchHelper::ProcessProblem, this, m_options, problem_idx);
+        }
+
+        m_threadpool->Wait();
 	}
 
 	void PatchMatchHelper::Init(CudaPatchMatch::Options options_)
@@ -295,6 +211,119 @@ namespace GU
             m_gpuIndices.resize(num_cuda_devices);
             std::iota(m_gpuIndices.begin(), m_gpuIndices.end(), 0);
         }
+    }
+    void PatchMatchHelper::ProcessProblem(const CudaPatchMatch::Options& options, const size_t problem_idx)
+    {
+        const auto& model = m_workspace->GetModel();
+        auto& problem = m_problems.at(problem_idx);
+        const int gpu_index = m_gpuIndices.at(m_threadpool->GetThreadIndex());
+        CHECK_GE(gpu_index, -1);
+        const std::string& stereo_folder = m_workspace->GetOptions().stereo_folder;
+        const std::string output_type = "geometric";
+        const std::string image_name = model.GetImageName(problem.ref_image_idx);
+        const std::string file_name =
+            colmap::StringPrintf("%s.%s.bin", image_name.c_str(), output_type.c_str());
+        const std::string depth_map_path =
+            colmap::JoinPaths(m_options.workingspace, stereo_folder, "depth_maps", file_name);
+        const std::string normal_map_path =
+            colmap::JoinPaths(m_options.workingspace, stereo_folder, "normal_maps", file_name);
+        const std::string consistency_graph_path = colmap::JoinPaths(
+            m_options.workingspace, stereo_folder, "consistency_graphs", file_name);
+
+        if (colmap::ExistsFile(depth_map_path) && colmap::ExistsFile(normal_map_path)) {
+            return;
+        }
+
+        colmap::PrintHeading1(colmap::StringPrintf("Processing view %d / %d for %s",
+            0,
+            m_problems.size(),
+            image_name.c_str()));
+
+        auto patch_match_options = m_options;
+
+        if (patch_match_options.depth_min < 0 || patch_match_options.depth_max < 0) {
+            patch_match_options.depth_min =
+                m_depthRanges.at(problem.ref_image_idx).first;
+            patch_match_options.depth_max =
+                m_depthRanges.at(problem.ref_image_idx).second;
+            CHECK(patch_match_options.depth_min > 0 &&
+                patch_match_options.depth_max > 0)
+                << " - You must manually set the minimum and maximum depth, since no "
+                "sparse model is provided in the workspace.";
+        }
+
+        patch_match_options.gpu_index = std::to_string(gpu_index);
+
+        if (patch_match_options.sigma_spatial <= 0.0f) {
+            patch_match_options.sigma_spatial = patch_match_options.window_radius;
+        }
+
+        std::vector<colmap::mvs::Image> images = model.images;
+        std::vector<colmap::mvs::DepthMap> depth_maps;
+        std::vector<colmap::mvs::NormalMap> normal_maps;
+        if (m_options.geom_consistency) {
+            depth_maps.resize(model.images.size());
+            normal_maps.resize(model.images.size());
+        }
+
+        problem.images = &images;
+        problem.depth_maps = &depth_maps;
+        problem.normal_maps = &normal_maps;
+
+        {
+            // Collect all used images in current problem.
+            std::unordered_set<int> used_image_idxs(problem.src_image_idxs.begin(),
+                problem.src_image_idxs.end());
+            used_image_idxs.insert(problem.ref_image_idx);
+
+            patch_match_options.filter_min_num_consistent =
+                std::min(static_cast<int>(used_image_idxs.size()) - 1,
+                    patch_match_options.filter_min_num_consistent);
+
+            // Only access workspace from one thread at a time and only spawn resample
+            // threads from one master thread at a time.
+            std::unique_lock<std::mutex> lock(m_workspaceMutex);
+
+            LOG(INFO) << "Reading inputs...";
+            std::vector<int> src_image_idxs;
+            for (const auto image_idx : used_image_idxs) {
+                std::string image_path = m_workspace->GetBitmapPath(image_idx);
+                std::string depth_path = m_workspace->GetDepthMapPath(image_idx);
+                std::string normal_path = m_workspace->GetNormalMapPath(image_idx);
+
+                if (!colmap::ExistsFile(image_path) ||
+                    (m_options.geom_consistency && !colmap::ExistsFile(depth_path)) ||
+                    (m_options.geom_consistency && !colmap::ExistsFile(normal_path))) {
+                    if (m_options.allow_missing_files) {
+                        LOG(WARNING) << colmap::StringPrintf(
+                            "Skipping source image %d: %s for missing "
+                            "image or depth/normal map",
+                            image_idx,
+                            model.GetImageName(image_idx).c_str());
+                        continue;
+                    }
+                    else {
+                        LOG(ERROR) << colmap::StringPrintf(
+                            "Missing image or map dependency for image %d: %s",
+                            image_idx,
+                            model.GetImageName(image_idx).c_str());
+                    }
+                }
+
+                if (image_idx != problem.ref_image_idx) {
+                    src_image_idxs.push_back(image_idx);
+                }
+                images.at(image_idx).SetBitmap(m_workspace->GetBitmap(image_idx));
+                if (m_options.geom_consistency) {
+                    depth_maps.at(image_idx) = m_workspace->GetDepthMap(image_idx);
+                    normal_maps.at(image_idx) = m_workspace->GetNormalMap(image_idx);
+                }
+            }
+            problem.src_image_idxs = src_image_idxs;
+        }
+
+        problem.Print();
+        patch_match_options.Print();
     }
 }
 
