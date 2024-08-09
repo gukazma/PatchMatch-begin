@@ -1,3 +1,4 @@
+#include "PatchMatch.h"
 // Copyright (c) 2023, ETH Zurich and UNC Chapel Hill.
 // All rights reserved.
 //
@@ -45,6 +46,7 @@ namespace mvs {
 
 PatchMatch::PatchMatch(const PatchMatchOptions& options, const Problem& problem)
     : options_(options), problem_(problem) {}
+
 
 PatchMatch::~PatchMatch() {}
 

@@ -10,7 +10,7 @@
 #include <memory>
 namespace GU
 {
-    class DLL_API PatchMatch
+    class DLL_API CudaPatchMatch
     {
     public:
         struct Options
@@ -122,13 +122,13 @@ namespace GU
             // Print the configuration to stdout.
             void Print() const;
         };
-        void Init(Options options_);
+
+        CudaPatchMatch(Options options_, Problem problem_);
+        ~CudaPatchMatch();
 
         void Run();
 
-        Options options_;
-        std::unique_ptr<colmap::mvs::CachedWorkspace> workspace_;
-        std::vector<Problem> problems_;
-        std::vector<std::pair<float, float>> depth_ranges_;
+        Options m_options;
+        Problem m_problem;
     };
 }

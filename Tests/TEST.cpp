@@ -17,7 +17,7 @@
 #include <colmap/controllers/option_manager.h>
 #include <colmap/mvs/workspace.h>
 #include <colmap/controllers/automatic_reconstruction.h>
-#include <PatchMatch/PatchMatch.h>
+#include <PatchMatch/PatchMatchHelper.h>
 TEST(PatchMatch, IO)
 {
     colmap::Reconstruction reconstruction;
@@ -26,12 +26,11 @@ TEST(PatchMatch, IO)
 
 TEST(PatchMatch, MyPatchmatch)
 {
-    GU::PatchMatch patchMatch;
-    GU::PatchMatch::Options options;
+    GU::CudaPatchMatch::Options options;
     options.workingspace = "C:\\projects\\colmap1\\dense\\0";
     options.geom_consistency = false;
-    patchMatch.Init(options);
-    patchMatch.Run();
+    GU::PatchMatchHelper patchMatchHelper(options);
+    patchMatchHelper.Start();
 }
 
 
