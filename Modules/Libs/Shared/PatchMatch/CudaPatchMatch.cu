@@ -1,12 +1,16 @@
 #include "CudaPatchMatch.h"
 #include <iostream>
+#include <unordered_set>
 #include <cuda_runtime.h>
-#include <stdio.h>
 #include <device_launch_parameters.h>
 #include <Eigen/Core>
 #include <colmap/math/math.h>
-#include <unordered_set>
 #include <colmap/util/misc.h>
+#include <colmap/util/cuda.h>
+#include <colmap/util/cudacc.h>
+#include <colmap/mvs/gpu_mat_ref_image.h>
+#include <colmap/mvs/gpu_mat.h>
+#include <colmap/mvs/gpu_mat_prng.h>
 
 #define PrintOption(option) LOG(INFO) << #option ": " << option << std::endl
 namespace GU
@@ -28,7 +32,9 @@ namespace GU
     }
     CudaPatchMatch::CudaPatchMatch(Options options_, Problem problem_)
         : m_options(options_), m_problem(problem_)
-    {}
+    {
+        colmap::SetBestCudaDevice(std::stoi(options_.gpu_index));
+    }
 
     CudaPatchMatch::~CudaPatchMatch()
     {}
@@ -91,6 +97,28 @@ namespace GU
             CHECK_EQ(ref_image.GetWidth(), ref_normal_map.GetWidth());
             CHECK_EQ(ref_image.GetHeight(), ref_normal_map.GetHeight());
         }
+    }
+    void CudaPatchMatch::BindRefImageTexture()
+    {
+    }
+    void CudaPatchMatch::InitRefImage()
+    {
+        const colmap::mvs::Image& ref_image = m_problem.images->at(m_problem.ref_image_idx);
+
+        m_refWidth = ref_image.GetWidth();
+        m_refHeight= ref_image.GetHeight();
+
+        // Upload to device and filter.
+        m_refImage.reset(new colmap::mvs::GpuMatRefImage(m_refWidth, m_refHeight));
+        const std::vector<uint8_t> ref_image_array =
+            ref_image.GetBitmap().ConvertToRowMajorArray();
+        m_refImage->Filter(ref_image_array.data(),
+            m_options.window_radius,
+            m_options.window_step,
+            m_options.sigma_spatial,
+            m_options.sigma_color);
+
+        BindRefImageTexture();
     }
     void CudaPatchMatch::Run()
     {

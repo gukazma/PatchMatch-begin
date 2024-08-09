@@ -1,13 +1,18 @@
 #pragma once
 #include <Common/Export.h>
+
 #include <string>
 #include <vector>
+#include <memory>
+
 #include <colmap/mvs/image.h>
 #include <colmap/mvs/depth_map.h>
 #include <colmap/mvs/normal_map.h>
 #include <colmap/mvs/workspace.h>
 #include <colmap/util/logging.h>
-#include <memory>
+#include <colmap/mvs/gpu_mat_ref_image.h>
+#include <colmap/mvs/gpu_mat.h>
+#include <colmap/mvs/gpu_mat_prng.h>
 namespace GU
 {
     const static size_t kMaxPatchMatchWindowRadius = 32;
@@ -129,8 +134,37 @@ namespace GU
     private:
         void Check() const;
 
+        void ComputeCudaConfig();
+
+        void BindRefImageTexture();
+
+        void InitRefImage();
+        void InitSourceImages();
+        void InitTransforms();
+        void InitWorkspaceMemory();
+
+        // Rotate reference image by 90 degrees in counter-clockwise direction.
+        void Rotate();
+
     private:
         Options m_options;
         Problem m_problem;
+
+        // Original (not rotated) dimension of reference image.
+        size_t m_refWidth;
+        size_t m_refHeight;
+
+        std::unique_ptr<colmap::mvs::GpuMatRefImage>    m_refImage;
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_depthMap;
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_normalMap;
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_selProbMap;
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_prevSelProbMap;
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_costMap;
+        std::unique_ptr<colmap::mvs::GpuMatPRNG>        m_randStateMap;
+        std::unique_ptr<colmap::mvs::GpuMat<uint8_t>>   m_consistencyMask;
+
+        // Shared memory is too small to hold local state for each thread,
+        // so this is workspace memory in global memory.
+        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_globalWorkspace;
     };
 }
