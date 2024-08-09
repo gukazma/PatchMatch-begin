@@ -1,9 +1,12 @@
 #include "PatchMatchHelper.h"
 #include <iostream>
 #include <unordered_set>
+#include <numeric>
 #include <Eigen/Core>
 #include <colmap/math/math.h>
 #include <colmap/util/misc.h>
+#include <colmap/util/cuda.h>
+#include <colmap/util/cudacc.h>
 namespace GU
 {
 	PatchMatchHelper::PatchMatchHelper(CudaPatchMatch::Options options)
@@ -16,7 +19,7 @@ namespace GU
 	{
 	}
 
-	void PatchMatchHelper::Start()
+	void PatchMatchHelper::Run()
 	{
         const auto& model = m_workspace->GetModel();
         auto& problem = m_problems.at(0);
@@ -134,6 +137,7 @@ namespace GU
 	{
 		InitWorkspace(options_);
 		InitProblems(options_);
+        InitGpuIndices(options_);
 	}
 
 	void PatchMatchHelper::InitWorkspace(CudaPatchMatch::Options options_)
@@ -282,7 +286,16 @@ namespace GU
         LOG(INFO) << colmap::StringPrintf("Configuration has %d problems...",
             m_problems.size());
 	}
-
+    void PatchMatchHelper::InitGpuIndices(CudaPatchMatch::Options options_)
+    {
+        m_gpuIndices = colmap::CSVToVector<int>(options_.gpu_index);
+        if (m_gpuIndices.size() == 1 && m_gpuIndices[0] == -1) {
+            const int num_cuda_devices = colmap::GetNumCudaDevices();
+            CHECK_GT(num_cuda_devices, 0);
+            m_gpuIndices.resize(num_cuda_devices);
+            std::iota(m_gpuIndices.begin(), m_gpuIndices.end(), 0);
+        }
+    }
 }
 
 

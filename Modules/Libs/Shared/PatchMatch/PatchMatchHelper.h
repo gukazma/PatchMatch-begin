@@ -16,15 +16,17 @@ namespace GU
 	public:
 		PatchMatchHelper(CudaPatchMatch::Options options_);
 		~PatchMatchHelper();
-		void Start();
+		void Run();
 	private:
 		void Init(CudaPatchMatch::Options options_);
 		void InitWorkspace(CudaPatchMatch::Options options_);
 		void InitProblems(CudaPatchMatch::Options options_);
+		void InitGpuIndices(CudaPatchMatch::Options options_);
 
 		CudaPatchMatch::Options m_options;
 		std::unique_ptr<colmap::mvs::CachedWorkspace> m_workspace;
 		std::vector<CudaPatchMatch::Problem> m_problems;
 		std::vector<std::pair<float, float>> m_depthRanges;
+		std::vector<int> m_gpuIndices;
 	};
 }
