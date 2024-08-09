@@ -9,8 +9,13 @@
 #include <colmap/util/cudacc.h>
 namespace GU
 {
-	PatchMatchHelper::PatchMatchHelper(CudaPatchMatch::Options options)
-		: m_options(options)
+	PatchMatchHelper::PatchMatchHelper(CudaPatchMatch::Options options,
+        const std::string& workspace_path,
+        const std::string& workspace_format,
+        const std::string& pmvs_option_name,
+        const std::string& config_path)
+		: m_options(options),m_workspacePath(workspace_path), m_workspaceFormat(workspace_format), m_pmvsOptionName(pmvs_option_name)
+        ,m_configPath(config_path)
 	{
 		Init(m_options);
 	}
@@ -62,7 +67,7 @@ namespace GU
 		workspace_options.max_image_size = 1000;
 		workspace_options.image_as_rgb = false;
 		workspace_options.cache_size = 32;
-		workspace_options.workspace_path = options_.workingspace;
+		workspace_options.workspace_path = m_workspacePath;
 		workspace_options.workspace_format = "COLMAP";
 		workspace_options.input_type = "photometric";
 		m_workspace = std::make_unique<colmap::mvs::CachedWorkspace>(workspace_options);
@@ -73,9 +78,9 @@ namespace GU
 	{
         const auto& model = m_workspace->GetModel();
 
-        const std::string config_path = options_.configpath.empty() ? colmap::JoinPaths(options_.workingspace,
+        const std::string config_path = m_configPath.empty() ? colmap::JoinPaths(m_workspacePath,
             m_workspace->GetOptions().stereo_folder,
-            "patch-match.cfg") : options_.configpath;
+            "patch-match.cfg") : m_configPath;
         std::vector<std::string> config = colmap::ReadTextFileLines(config_path);
 
         std::vector<std::map<int, int>> shared_num_points;
@@ -224,11 +229,11 @@ namespace GU
         const std::string file_name =
             colmap::StringPrintf("%s.%s.bin", image_name.c_str(), output_type.c_str());
         const std::string depth_map_path =
-            colmap::JoinPaths(m_options.workingspace, stereo_folder, "depth_maps", file_name);
+            colmap::JoinPaths(m_workspacePath, stereo_folder, "depth_maps", file_name);
         const std::string normal_map_path =
-            colmap::JoinPaths(m_options.workingspace, stereo_folder, "normal_maps", file_name);
+            colmap::JoinPaths(m_workspacePath, stereo_folder, "normal_maps", file_name);
         const std::string consistency_graph_path = colmap::JoinPaths(
-            m_options.workingspace, stereo_folder, "consistency_graphs", file_name);
+            m_workspacePath, stereo_folder, "consistency_graphs", file_name);
 
         if (colmap::ExistsFile(depth_map_path) && colmap::ExistsFile(normal_map_path)) {
             return;
@@ -324,6 +329,9 @@ namespace GU
 
         problem.Print();
         patch_match_options.Print();
+
+        CudaPatchMatch patchmatch(m_options, problem);
+        patchmatch.Run();
     }
 }
 

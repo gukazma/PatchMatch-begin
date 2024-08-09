@@ -26,10 +26,13 @@ TEST(PatchMatch, IO)
 
 TEST(PatchMatch, MyPatchmatch)
 {
+    std::string workspace_path = "C:/projects/colmap1/dense/0";
+    std::string workspace_format = "COLMAP";
+    std::string pmvs_option_name = "option-all";
+    std::string config_path;
     GU::CudaPatchMatch::Options options;
-    options.workingspace = "C:\\projects\\colmap1\\dense\\0";
     options.geom_consistency = false;
-    GU::PatchMatchHelper patchMatchHelper(options);
+    GU::PatchMatchHelper patchMatchHelper(options, workspace_path, workspace_format, pmvs_option_name);
     patchMatchHelper.Run();
 }
 

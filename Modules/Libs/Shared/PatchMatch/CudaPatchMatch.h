@@ -15,9 +15,6 @@ namespace GU
     public:
         struct Options
         {
-            std::string workingspace;
-            std::string configpath;
-
             // Maximum image size in either dimension.
             int max_image_size = -1;
 

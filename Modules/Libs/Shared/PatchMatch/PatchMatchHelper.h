@@ -18,7 +18,11 @@ namespace GU
 	class DLL_API PatchMatchHelper
 	{
 	public:
-		PatchMatchHelper(CudaPatchMatch::Options options_);
+		PatchMatchHelper(CudaPatchMatch::Options options_,
+			const std::string& workspace_path,
+			const std::string& workspace_format,
+			const std::string& pmvs_option_name,
+			const std::string& config_path = "");
 		~PatchMatchHelper();
 		void Run();
 	private:
@@ -32,6 +36,11 @@ namespace GU
 	private:
 
 		CudaPatchMatch::Options m_options;
+		const std::string m_workspacePath;
+		const std::string m_workspaceFormat;
+		const std::string m_pmvsOptionName;
+		const std::string m_configPath;
+
 		std::unique_ptr<colmap::mvs::CachedWorkspace> m_workspace;
 		std::unique_ptr<colmap::ThreadPool> m_threadpool;
 		std::mutex m_workspaceMutex;
