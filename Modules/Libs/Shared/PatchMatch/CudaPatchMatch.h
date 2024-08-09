@@ -10,6 +10,8 @@
 #include <memory>
 namespace GU
 {
+    const static size_t kMaxPatchMatchWindowRadius = 32;
+
     class DLL_API CudaPatchMatch
     {
     public:
@@ -99,6 +101,7 @@ namespace GU
             bool write_consistency_graph = false;
 
             void Print() const;
+            bool Check() const;
         };
         struct Problem {
             // Index of the reference image.
@@ -122,9 +125,11 @@ namespace GU
 
         CudaPatchMatch(Options options_, Problem problem_);
         ~CudaPatchMatch();
-
         void Run();
+    private:
+        void Check() const;
 
+    private:
         Options m_options;
         Problem m_problem;
     };
