@@ -240,7 +240,7 @@ namespace GU
         }
 
         colmap::PrintHeading1(colmap::StringPrintf("Processing view %d / %d for %s",
-            0,
+            problem_idx,
             m_problems.size(),
             image_name.c_str()));
 
