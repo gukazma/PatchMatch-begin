@@ -147,6 +147,9 @@ namespace GU
         // Rotate reference image by 90 degrees in counter-clockwise direction.
         void Rotate();
 
+        template <int kWindowSize, int kWindowStep>
+        void RunWithWindowSizeAndStep();
+
     private:
 
         const Options options_;
