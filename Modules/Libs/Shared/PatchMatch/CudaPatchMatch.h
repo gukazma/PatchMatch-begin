@@ -10,6 +10,7 @@
 #include <colmap/mvs/normal_map.h>
 #include <colmap/mvs/workspace.h>
 #include <colmap/util/logging.h>
+#include <colmap/mvs/cuda_texture.h>
 #include <colmap/mvs/gpu_mat_ref_image.h>
 #include <colmap/mvs/gpu_mat.h>
 #include <colmap/mvs/gpu_mat_prng.h>
@@ -162,6 +163,11 @@ namespace GU
         std::unique_ptr<colmap::mvs::GpuMat<float>>     m_costMap;
         std::unique_ptr<colmap::mvs::GpuMatPRNG>        m_randStateMap;
         std::unique_ptr<colmap::mvs::GpuMat<uint8_t>>   m_consistencyMask;
+
+        // Reference and source image input data.
+        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<uint8_t>> m_refImageTexture;
+        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<uint8_t>> m_srcImagesTexture;
+        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<float>> m_srcDepthMapsTexture;
 
         // Shared memory is too small to hold local state for each thread,
         // so this is workspace memory in global memory.

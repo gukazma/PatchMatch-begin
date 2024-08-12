@@ -34,6 +34,10 @@ namespace GU
         : m_options(options_), m_problem(problem_)
     {
         colmap::SetBestCudaDevice(std::stoi(options_.gpu_index));
+        InitRefImage();
+        InitSourceImages();
+        InitTransforms();
+        InitWorkspaceMemory();
     }
 
     CudaPatchMatch::~CudaPatchMatch()
@@ -98,6 +102,9 @@ namespace GU
             CHECK_EQ(ref_image.GetHeight(), ref_normal_map.GetHeight());
         }
     }
+    void CudaPatchMatch::ComputeCudaConfig()
+    {
+    }
     void CudaPatchMatch::BindRefImageTexture()
     {
     }
@@ -112,6 +119,7 @@ namespace GU
         m_refImage.reset(new colmap::mvs::GpuMatRefImage(m_refWidth, m_refHeight));
         const std::vector<uint8_t> ref_image_array =
             ref_image.GetBitmap().ConvertToRowMajorArray();
+        // Í¼ÏñµÄË«±ßÂË²¨
         m_refImage->Filter(ref_image_array.data(),
             m_options.window_radius,
             m_options.window_step,
@@ -119,6 +127,102 @@ namespace GU
             m_options.sigma_color);
 
         BindRefImageTexture();
+    }
+    void CudaPatchMatch::InitSourceImages()
+    {
+        // Determine maximum image size.
+        size_t max_width = 0;
+        size_t max_height = 0;
+        for (const auto image_idx : m_problem.src_image_idxs) {
+            const colmap::mvs::Image& image = m_problem.images->at(image_idx);
+            if (image.GetWidth() > max_width) {
+                max_width = image.GetWidth();
+            }
+            if (image.GetHeight() > max_height) {
+                max_height = image.GetHeight();
+            }
+        }
+
+        // Upload source images to device.
+        {
+            // Copy source images to contiguous memory block.
+            const uint8_t kDefaultValue = 0;
+            std::vector<uint8_t> src_images_host_data(
+                static_cast<size_t>(max_width * max_height *
+                    m_problem.src_image_idxs.size()),
+                kDefaultValue);
+            for (size_t i = 0; i < m_problem.src_image_idxs.size(); ++i) {
+                const colmap::mvs::Image& image = m_problem.images->at(m_problem.src_image_idxs[i]);
+                const colmap::Bitmap& bitmap = image.GetBitmap();
+                uint8_t* dest = src_images_host_data.data() + max_width * max_height * i;
+                for (size_t r = 0; r < image.GetHeight(); ++r) {
+                    memcpy(dest, bitmap.GetScanline(r), image.GetWidth() * sizeof(uint8_t));
+                    dest += max_width;
+                }
+            }
+
+            // Create source images texture.
+            cudaTextureDesc texture_desc;
+            memset(&texture_desc, 0, sizeof(texture_desc));
+            texture_desc.addressMode[0] = cudaAddressModeBorder;
+            texture_desc.addressMode[1] = cudaAddressModeBorder;
+            texture_desc.addressMode[2] = cudaAddressModeBorder;
+            texture_desc.filterMode = cudaFilterModeLinear;
+            texture_desc.readMode = cudaReadModeNormalizedFloat;
+            texture_desc.normalizedCoords = false;
+            m_srcImagesTexture = colmap::mvs::CudaArrayLayeredTexture<uint8_t>::FromHostArray(
+                texture_desc,
+                max_width,
+                max_height,
+                m_problem.src_image_idxs.size(),
+                src_images_host_data.data());
+        }
+
+        // Upload source depth maps to device.
+        if (m_options.geom_consistency) {
+            const float kDefaultValue = 0.0f;
+            std::vector<float> src_depth_maps_host_data(
+                static_cast<size_t>(max_width * max_height *
+                    m_problem.src_image_idxs.size()),
+                kDefaultValue);
+            for (size_t i = 0; i < m_problem.src_image_idxs.size(); ++i) {
+                const colmap::mvs::DepthMap& depth_map =
+                    m_problem.depth_maps->at(m_problem.src_image_idxs[i]);
+                float* dest =
+                    src_depth_maps_host_data.data() + max_width * max_height * i;
+                for (size_t r = 0; r < depth_map.GetHeight(); ++r) {
+                    memcpy(dest,
+                        depth_map.GetPtr() + r * depth_map.GetWidth(),
+                        depth_map.GetWidth() * sizeof(float));
+                    dest += max_width;
+                }
+            }
+
+            // Create source depth maps texture.
+            cudaTextureDesc texture_desc;
+            memset(&texture_desc, 0, sizeof(texture_desc));
+            texture_desc.addressMode[0] = cudaAddressModeBorder;
+            texture_desc.addressMode[1] = cudaAddressModeBorder;
+            texture_desc.addressMode[2] = cudaAddressModeBorder;
+            texture_desc.filterMode = cudaFilterModePoint;
+            texture_desc.readMode = cudaReadModeElementType;
+            texture_desc.normalizedCoords = false;
+            m_srcDepthMapsTexture = colmap::mvs::CudaArrayLayeredTexture<float>::FromHostArray(
+                texture_desc,
+                max_width,
+                max_height,
+                m_problem.src_image_idxs.size(),
+                src_depth_maps_host_data.data());
+        }
+    }
+    void CudaPatchMatch::InitTransforms()
+    {
+    }
+    void CudaPatchMatch::InitWorkspaceMemory()
+    {
+    }
+    void CudaPatchMatch::Rotate()
+    {
     }
     void CudaPatchMatch::Run()
     {
