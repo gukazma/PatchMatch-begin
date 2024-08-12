@@ -1,7 +1,9 @@
 #include "CudaPatchMatch.h"
 #include <iostream>
 #include <unordered_set>
+#define __CUDACC__
 #include <cuda_runtime.h>
+#include <texture_indirect_functions.h>
 #include <device_launch_parameters.h>
 #include <Eigen/Core>
 #include <colmap/math/math.h>
@@ -13,6 +15,16 @@
 #include <colmap/mvs/gpu_mat_prng.h>
 
 #define PrintOption(option) LOG(INFO) << #option ": " << option << std::endl
+
+// The number of threads per Cuda thread. Warning: Do not change this value,
+// since the templated window sizes rely on this value.
+#define THREADS_PER_BLOCK 32
+
+// We must not include "util/math.h" to avoid any Eigen includes here,
+// since Visual Studio cannot compile some of the Eigen/Boost expressions.
+#ifndef DEG2RAD
+#define DEG2RAD(deg) deg * 0.0174532925199432
+#endif
 namespace GU
 {
     using namespace colmap;
@@ -22,7 +34,353 @@ namespace GU
     // Calibration of reference image as {1/fx, -cx/fx, 1/fy, -cy/fy}.
     __constant__ float ref_inv_K[4];
 
+    __device__ inline void ComposeHomography(
+        const cudaTextureObject_t poses_texture,
+        const int image_idx,
+        const int row,
+        const int col,
+        const float depth,
+        const float normal[3],
+        float H[9]) {
+        // Calibration of source image.
+        float K[4];
+        for (int i = 0; i < 4; ++i) {
+            K[i] = tex2D<float>(poses_texture, i, image_idx);
+        }
 
+        // Relative rotation between reference and source image.
+        float R[9];
+        for (int i = 0; i < 9; ++i) {
+            R[i] = tex2D<float>(poses_texture, i + 4, image_idx);
+        }
+
+        // Relative translation between reference and source image.
+        float T[3];
+        for (int i = 0; i < 3; ++i) {
+            T[i] = tex2D<float>(poses_texture, i + 13, image_idx);
+        }
+
+        // Distance to the plane.
+        const float dist =
+            depth * (normal[0] * (ref_inv_K[0] * col + ref_inv_K[1]) +
+                normal[1] * (ref_inv_K[2] * row + ref_inv_K[3]) + normal[2]);
+        const float inv_dist = 1.0f / dist;
+
+        const float inv_dist_N0 = inv_dist * normal[0];
+        const float inv_dist_N1 = inv_dist * normal[1];
+        const float inv_dist_N2 = inv_dist * normal[2];
+
+        // Homography as H = K * (R - T * n' / d) * Kref^-1.
+        H[0] = ref_inv_K[0] * (K[0] * (R[0] + inv_dist_N0 * T[0]) +
+            K[1] * (R[6] + inv_dist_N0 * T[2]));
+        H[1] = ref_inv_K[2] * (K[0] * (R[1] + inv_dist_N1 * T[0]) +
+            K[1] * (R[7] + inv_dist_N1 * T[2]));
+        H[2] = K[0] * (R[2] + inv_dist_N2 * T[0]) +
+            K[1] * (R[8] + inv_dist_N2 * T[2]) +
+            ref_inv_K[1] * (K[0] * (R[0] + inv_dist_N0 * T[0]) +
+                K[1] * (R[6] + inv_dist_N0 * T[2])) +
+            ref_inv_K[3] * (K[0] * (R[1] + inv_dist_N1 * T[0]) +
+                K[1] * (R[7] + inv_dist_N1 * T[2]));
+        H[3] = ref_inv_K[0] * (K[2] * (R[3] + inv_dist_N0 * T[1]) +
+            K[3] * (R[6] + inv_dist_N0 * T[2]));
+        H[4] = ref_inv_K[2] * (K[2] * (R[4] + inv_dist_N1 * T[1]) +
+            K[3] * (R[7] + inv_dist_N1 * T[2]));
+        H[5] = K[2] * (R[5] + inv_dist_N2 * T[1]) +
+            K[3] * (R[8] + inv_dist_N2 * T[2]) +
+            ref_inv_K[1] * (K[2] * (R[3] + inv_dist_N0 * T[1]) +
+                K[3] * (R[6] + inv_dist_N0 * T[2])) +
+            ref_inv_K[3] * (K[2] * (R[4] + inv_dist_N1 * T[1]) +
+                K[3] * (R[7] + inv_dist_N1 * T[2]));
+        H[6] = ref_inv_K[0] * (R[6] + inv_dist_N0 * T[2]);
+        H[7] = ref_inv_K[2] * (R[7] + inv_dist_N1 * T[2]);
+        H[8] = R[8] + ref_inv_K[1] * (R[6] + inv_dist_N0 * T[2]) +
+            ref_inv_K[3] * (R[7] + inv_dist_N1 * T[2]) + inv_dist_N2 * T[2];
+    }
+
+
+    // Each thread in the current warp / thread block reads in 3 columns of the
+    // reference image. The shared memory holds 3 * THREADS_PER_BLOCK columns and
+    // kWindowSize rows of the reference image. Each thread copies every
+    // THREADS_PER_BLOCK-th column from global to shared memory offset by its ID.
+    // For example, if THREADS_PER_BLOCK = 32, then thread 0 reads columns 0, 32, 64
+    // and thread 1 columns 1, 33, 65. When computing the photoconsistency, which is
+    // shared among each thread block, each thread can then read the reference image
+    // colors from shared memory. Note that this limits the window radius to a
+    // maximum of THREADS_PER_BLOCK.
+    template <int kWindowSize>
+    struct LocalRefImage {
+        const static int kWindowRadius = kWindowSize / 2;
+        const static int kThreadBlockRadius = 1;
+        const static int kThreadBlockSize = 2 * kThreadBlockRadius + 1;
+        const static int kNumRows = kWindowSize;
+        const static int kNumColumns = kThreadBlockSize * THREADS_PER_BLOCK;
+        const static int kDataSize = kNumRows * kNumColumns;
+
+        __device__ explicit LocalRefImage(const cudaTextureObject_t ref_image_texture)
+            : ref_image_texture_(ref_image_texture) {}
+
+        float* data = nullptr;
+
+        __device__ inline void Read(const int row) {
+            // For the first row, read the entire block into shared memory. For all
+            // consecutive rows, it is only necessary to shift the rows in shared memory
+            // up by one element and then read in a new row at the bottom of the shared
+            // memory. Note that this assumes that the calling loop starts with the
+            // first row and then consecutively reads in the next row.
+
+            const int thread_id = threadIdx.x;
+            const int thread_block_first_id = blockDim.x * blockIdx.x;
+
+            const int local_col_start = thread_id;
+            const int global_col_start = thread_block_first_id -
+                kThreadBlockRadius * THREADS_PER_BLOCK +
+                thread_id;
+
+            if (row == 0) {
+                int global_row = row - kWindowRadius;
+                for (int local_row = 0; local_row < kNumRows; ++local_row, ++global_row) {
+                    int local_col = local_col_start;
+                    int global_col = global_col_start;
+#pragma unroll
+                    for (int block = 0; block < kThreadBlockSize; ++block) {
+                        data[local_row * kNumColumns + local_col] =
+                            tex2D<float>(ref_image_texture_, global_col, global_row);
+                        local_col += THREADS_PER_BLOCK;
+                        global_col += THREADS_PER_BLOCK;
+                    }
+                }
+            }
+            else {
+                // Move rows in shared memory up by one row.
+                for (int local_row = 1; local_row < kNumRows; ++local_row) {
+                    int local_col = local_col_start;
+#pragma unroll
+                    for (int block = 0; block < kThreadBlockSize; ++block) {
+                        data[(local_row - 1) * kNumColumns + local_col] =
+                            data[local_row * kNumColumns + local_col];
+                        local_col += THREADS_PER_BLOCK;
+                    }
+                }
+
+                // Read next row into the last row of shared memory.
+                const int local_row = kNumRows - 1;
+                const int global_row = row + kWindowRadius;
+                int local_col = local_col_start;
+                int global_col = global_col_start;
+#pragma unroll
+                for (int block = 0; block < kThreadBlockSize; ++block) {
+                    data[local_row * kNumColumns + local_col] =
+                        tex2D<float>(ref_image_texture_, global_col, global_row);
+                    local_col += THREADS_PER_BLOCK;
+                    global_col += THREADS_PER_BLOCK;
+                }
+            }
+        }
+
+    private:
+        const cudaTextureObject_t ref_image_texture_;
+    };
+
+    template <int kWindowSize, int kWindowStep>
+    struct PhotoConsistencyCostComputer {
+        const static int kWindowRadius = kWindowSize / 2;
+
+        __device__ PhotoConsistencyCostComputer(
+            const cudaTextureObject_t ref_image_texture,
+            const cudaTextureObject_t src_images_texture,
+            const cudaTextureObject_t poses_texture,
+            const float sigma_spatial,
+            const float sigma_color)
+            : local_ref_image(ref_image_texture),
+            src_images_texture_(src_images_texture),
+            poses_texture_(poses_texture),
+            bilateral_weight_computer_(sigma_spatial, sigma_color) {}
+
+        // Maximum photo consistency cost as 1 - min(NCC).
+        const float kMaxCost = 2.0f;
+
+        // Thread warp local reference image data around current patch.
+        typedef LocalRefImage<kWindowSize> LocalRefImageType;
+        LocalRefImageType local_ref_image;
+
+        // Precomputed sum of raw and squared image intensities.
+        float local_ref_sum = 0.0f;
+        float local_ref_squared_sum = 0.0f;
+
+        // Index of source image.
+        int src_image_idx = -1;
+
+        // Center position of patch in reference image.
+        int row = -1;
+        int col = -1;
+
+        // Depth and normal for which to warp patch.
+        float depth = 0.0f;
+        const float* normal = nullptr;
+
+        __device__ inline void Read(const int row) {
+            local_ref_image.Read(row);
+            __syncthreads();
+        }
+
+        __device__ inline float Compute() const {
+            float tform[9];
+            ComposeHomography(
+                poses_texture_, src_image_idx, row, col, depth, normal, tform);
+
+            float tform_step[8];
+            for (int i = 0; i < 8; ++i) {
+                tform_step[i] = kWindowStep * tform[i];
+            }
+
+            const int thread_id = threadIdx.x;
+            const int row_start = row - kWindowRadius;
+            const int col_start = col - kWindowRadius;
+
+            float col_src = tform[0] * col_start + tform[1] * row_start + tform[2];
+            float row_src = tform[3] * col_start + tform[4] * row_start + tform[5];
+            float z = tform[6] * col_start + tform[7] * row_start + tform[8];
+            float base_col_src = col_src;
+            float base_row_src = row_src;
+            float base_z = z;
+
+            int ref_image_idx = THREADS_PER_BLOCK - kWindowRadius + thread_id;
+            int ref_image_base_idx = ref_image_idx;
+
+            const float ref_center_color =
+                local_ref_image
+                .data[ref_image_idx + kWindowRadius * 3 * THREADS_PER_BLOCK +
+                kWindowRadius];
+            const float ref_color_sum = local_ref_sum;
+            const float ref_color_squared_sum = local_ref_squared_sum;
+            float src_color_sum = 0.0f;
+            float src_color_squared_sum = 0.0f;
+            float src_ref_color_sum = 0.0f;
+            float bilateral_weight_sum = 0.0f;
+
+            for (int row = -kWindowRadius; row <= kWindowRadius; row += kWindowStep) {
+                for (int col = -kWindowRadius; col <= kWindowRadius; col += kWindowStep) {
+                    const float inv_z = 1.0f / z;
+                    const float norm_col_src = inv_z * col_src + 0.5f;
+                    const float norm_row_src = inv_z * row_src + 0.5f;
+                    const float ref_color = local_ref_image.data[ref_image_idx];
+                    const float src_color = tex2DLayered<float>(
+                        src_images_texture_, norm_col_src, norm_row_src, src_image_idx);
+
+                    const float bilateral_weight = bilateral_weight_computer_.Compute(
+                        row, col, ref_center_color, ref_color);
+
+                    const float bilateral_weight_src = bilateral_weight * src_color;
+
+                    src_color_sum += bilateral_weight_src;
+                    src_color_squared_sum += bilateral_weight_src * src_color;
+                    src_ref_color_sum += bilateral_weight_src * ref_color;
+                    bilateral_weight_sum += bilateral_weight;
+
+                    ref_image_idx += kWindowStep;
+
+                    // Accumulate warped source coordinates per row to reduce numerical
+                    // errors. Note that this is necessary since coordinates usually are in
+                    // the order of 1000s as opposed to the color values which are
+                    // normalized to the range [0, 1].
+                    col_src += tform_step[0];
+                    row_src += tform_step[3];
+                    z += tform_step[6];
+                }
+
+                ref_image_base_idx += kWindowStep * 3 * THREADS_PER_BLOCK;
+                ref_image_idx = ref_image_base_idx;
+
+                base_col_src += tform_step[1];
+                base_row_src += tform_step[4];
+                base_z += tform_step[7];
+
+                col_src = base_col_src;
+                row_src = base_row_src;
+                z = base_z;
+            }
+
+            const float inv_bilateral_weight_sum = 1.0f / bilateral_weight_sum;
+            src_color_sum *= inv_bilateral_weight_sum;
+            src_color_squared_sum *= inv_bilateral_weight_sum;
+            src_ref_color_sum *= inv_bilateral_weight_sum;
+
+            const float ref_color_var =
+                ref_color_squared_sum - ref_color_sum * ref_color_sum;
+            const float src_color_var =
+                src_color_squared_sum - src_color_sum * src_color_sum;
+
+            // Based on Jensen's Inequality for convex functions, the variance
+            // should always be larger than 0. Do not make this threshold smaller.
+            constexpr float kMinVar = 1e-5f;
+            if (ref_color_var < kMinVar || src_color_var < kMinVar) {
+                return kMaxCost;
+            }
+            else {
+                const float src_ref_color_covar =
+                    src_ref_color_sum - ref_color_sum * src_color_sum;
+                const float src_ref_color_var = sqrt(ref_color_var * src_color_var);
+                return max(0.0f,
+                    min(kMaxCost, 1.0f - src_ref_color_covar / src_ref_color_var));
+            }
+        }
+
+    private:
+        const cudaTextureObject_t src_images_texture_;
+        const cudaTextureObject_t poses_texture_;
+        const BilateralWeightComputer bilateral_weight_computer_;
+    };
+
+
+    template <int kWindowSize, int kWindowStep>
+    __global__ void ComputeInitialCost(GpuMat<float> cost_map,
+        const GpuMat<float> depth_map,
+        const GpuMat<float> normal_map,
+        const cudaTextureObject_t ref_image_texture,
+        const GpuMat<float> ref_sum_image,
+        const GpuMat<float> ref_squared_sum_image,
+        const cudaTextureObject_t src_images_texture,
+        const cudaTextureObject_t poses_texture,
+        const float sigma_spatial,
+        const float sigma_color) {
+        const int col = blockDim.x * blockIdx.x + threadIdx.x;
+
+        typedef PhotoConsistencyCostComputer<kWindowSize, kWindowStep>
+            PhotoConsistencyCostComputerType;
+        PhotoConsistencyCostComputerType pcc_computer(ref_image_texture,
+            src_images_texture,
+            poses_texture,
+            sigma_spatial,
+            sigma_color);
+        pcc_computer.col = col;
+
+        __shared__ float local_ref_image_data
+            [PhotoConsistencyCostComputerType::LocalRefImageType::kDataSize];
+        pcc_computer.local_ref_image.data = &local_ref_image_data[0];
+
+        float normal[3] = { 0 };
+        pcc_computer.normal = normal;
+
+        for (int row = 0; row < cost_map.GetHeight(); ++row) {
+            // Note that this must be executed even for pixels outside the borders,
+            // since pixels are used in the local neighborhood of the current pixel.
+            pcc_computer.Read(row);
+
+            if (col < cost_map.GetWidth()) {
+                pcc_computer.depth = depth_map.Get(row, col);
+                normal_map.GetSlice(row, col, normal);
+
+                pcc_computer.row = row;
+                pcc_computer.local_ref_sum = ref_sum_image.Get(row, col);
+                pcc_computer.local_ref_squared_sum = ref_squared_sum_image.Get(row, col);
+
+                for (int image_idx = 0; image_idx < cost_map.GetDepth(); ++image_idx) {
+                    pcc_computer.src_image_idx = image_idx;
+                    cost_map.Set(row, col, image_idx, pcc_computer.Compute());
+                }
+            }
+        }
+    }
     __device__ inline float DotProduct3(const float vec1[3], const float vec2[3]) {
         return vec1[0] * vec2[0] + vec1[1] * vec2[1] + vec1[2] * vec2[2];
     }
@@ -164,6 +522,20 @@ namespace GU
     }
     void CudaPatchMatch::ComputeCudaConfig()
     {
+        sweep_block_size_.x = THREADS_PER_BLOCK;
+        sweep_block_size_.y = 1;
+        sweep_block_size_.z = 1;
+        sweep_grid_size_.x = (depth_map_->GetWidth() - 1) / THREADS_PER_BLOCK + 1;
+        sweep_grid_size_.y = 1;
+        sweep_grid_size_.z = 1;
+
+        elem_wise_block_size_.x = THREADS_PER_BLOCK;
+        elem_wise_block_size_.y = THREADS_PER_BLOCK;
+        elem_wise_block_size_.z = 1;
+        elem_wise_grid_size_.x = (depth_map_->GetWidth() - 1) / THREADS_PER_BLOCK + 1;
+        elem_wise_grid_size_.y =
+            (depth_map_->GetHeight() - 1) / THREADS_PER_BLOCK + 1;
+        elem_wise_grid_size_.z = 1;
     }
     void CudaPatchMatch::BindRefImageTexture()
     {
@@ -514,7 +886,25 @@ namespace GU
 
     template <int kWindowSize, int kWindowStep>
     void CudaPatchMatch::RunWithWindowSizeAndStep() {
-       
+        // Wait for all initializations to finish.
+        CUDA_SYNC_AND_CHECK();
+
+        CudaTimer total_timer;
+        CudaTimer init_timer;
+
+        ComputeCudaConfig();
+        ComputeInitialCost<kWindowSize, kWindowStep>
+            << <sweep_grid_size_, sweep_block_size_ >> > (*cost_map_,
+                *depth_map_,
+                *normal_map_,
+                ref_image_texture_->GetObj(),
+                *ref_image_->sum_image,
+                *ref_image_->squared_sum_image,
+                src_images_texture_->GetObj(),
+                poses_texture_[0]->GetObj(),
+                options_.sigma_spatial,
+                options_.sigma_color);
+        CUDA_SYNC_AND_CHECK();
     }
 
     void CudaPatchMatch::Options::Print() const
