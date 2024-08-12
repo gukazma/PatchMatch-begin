@@ -28,7 +28,7 @@ namespace GU
 
             // Index of the GPU used for patch match. For multi-GPU usage,
             // you should separate multiple GPU indices by comma, e.g., "0,1,2,3".
-            std::string gpu_index = "-1";
+            ::std::string gpu_index = "-1";
 
             // Depth range in which to randomly sample depth hypotheses.
             double depth_min = -1.0f;
@@ -148,29 +148,63 @@ namespace GU
         void Rotate();
 
     private:
-        Options m_options;
-        Problem m_problem;
+
+        const Options options_;
+        const Problem problem_;
+
+        // Dimensions for sweeping from top to bottom, i.e. one thread per column.
+        dim3 sweep_block_size_;
+        dim3 sweep_grid_size_;
+        // Dimensions for element-wise operations, i.e. one thread per pixel.
+        dim3 elem_wise_block_size_;
+        dim3 elem_wise_grid_size_;
 
         // Original (not rotated) dimension of reference image.
-        size_t m_refWidth;
-        size_t m_refHeight;
+        size_t ref_width_;
+        size_t ref_height_;
 
-        std::unique_ptr<colmap::mvs::GpuMatRefImage>    m_refImage;
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_depthMap;
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_normalMap;
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_selProbMap;
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_prevSelProbMap;
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_costMap;
-        std::unique_ptr<colmap::mvs::GpuMatPRNG>        m_randStateMap;
-        std::unique_ptr<colmap::mvs::GpuMat<uint8_t>>   m_consistencyMask;
+        // Rotation of reference image in pi/2. This is equivalent to the number of
+        // calls to `rotate` mod 4.
+        int rotation_in_half_pi_;
 
         // Reference and source image input data.
-        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<uint8_t>> m_refImageTexture;
-        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<uint8_t>> m_srcImagesTexture;
-        std::unique_ptr<colmap::mvs::CudaArrayLayeredTexture<float>> m_srcDepthMapsTexture;
+        ::std::unique_ptr<::colmap::mvs::CudaArrayLayeredTexture<uint8_t>> ref_image_texture_;
+        ::std::unique_ptr<::colmap::mvs::CudaArrayLayeredTexture<uint8_t>> src_images_texture_;
+        ::std::unique_ptr<::colmap::mvs::CudaArrayLayeredTexture<float>> src_depth_maps_texture_;
+
+        // Relative poses from rotated versions of reference image to source images
+        // corresponding to _rotationInHalfPi:
+        //
+        //    [S(1), S(2), S(3), ..., S(n)]
+        //
+        // where n is the number of source images and:
+        //
+        //    S(i) = [K_i(0, 0), K_i(0, 2), K_i(1, 1), K_i(1, 2), R_i(:), T_i(:)
+        //            C_i(:), P(:), P^-1(:)]
+        //
+        // where i denotes the index of the source image and K is its calibration.
+        // R, T, C, P, P^-1 denote the relative rotation, translation, camera
+        // center, projection, and inverse projection from there reference to the
+        // i-th source image.
+        ::std::unique_ptr<::colmap::mvs::CudaArrayLayeredTexture<float>> poses_texture_[4];
+
+        // Calibration matrix for rotated versions of reference image
+        // as {K[0, 0], K[0, 2], K[1, 1], K[1, 2]} corresponding to _rotationInHalfPi.
+        float ref_K_host_[4][4];
+        float ref_inv_K_host_[4][4];
+
+        // Data for reference image.
+        ::std::unique_ptr<::colmap::mvs::GpuMatRefImage> ref_image_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> depth_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> normal_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> sel_prob_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> prev_sel_prob_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> cost_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMatPRNG> rand_state_map_;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<uint8_t>> consistency_mask_;
 
         // Shared memory is too small to hold local state for each thread,
         // so this is workspace memory in global memory.
-        std::unique_ptr<colmap::mvs::GpuMat<float>>     m_globalWorkspace;
+        ::std::unique_ptr<::colmap::mvs::GpuMat<float>> global_workspace_;
     };
 }
