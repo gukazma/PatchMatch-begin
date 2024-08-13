@@ -884,6 +884,26 @@ namespace GU
 #undef CALL_RUN_FUNC
     }
 
+
+    struct SweepOptions {
+        float perturbation = 1.0f;
+        float depth_min = 0.0f;
+        float depth_max = 1.0f;
+        int num_samples = 15;
+        float sigma_spatial = 3.0f;
+        float sigma_color = 0.3f;
+        float ncc_sigma = 0.6f;
+        float min_triangulation_angle = 0.5f;
+        float incident_angle_sigma = 0.9f;
+        float prev_sel_prob_weight = 0.0f;
+        float geom_consistency_regularizer = 0.1f;
+        float geom_consistency_max_cost = 5.0f;
+        float filter_min_ncc = 0.1f;
+        float filter_min_triangulation_angle = 3.0f;
+        int filter_min_num_consistent = 2;
+        float filter_geom_consistency_max_cost = 1.0f;
+    };
+
     template <int kWindowSize, int kWindowStep>
     void CudaPatchMatch::RunWithWindowSizeAndStep() {
         // Wait for all initializations to finish.
@@ -905,6 +925,141 @@ namespace GU
                 options_.sigma_spatial,
                 options_.sigma_color);
         CUDA_SYNC_AND_CHECK();
+
+        init_timer.Print("Initialization");
+
+        const float total_num_steps = options_.num_iterations * 4;
+
+        SweepOptions sweep_options;
+        sweep_options.depth_min = options_.depth_min;
+        sweep_options.depth_max = options_.depth_max;
+        sweep_options.sigma_spatial = options_.sigma_spatial;
+        sweep_options.sigma_color = options_.sigma_color;
+        sweep_options.num_samples = options_.num_samples;
+        sweep_options.ncc_sigma = options_.ncc_sigma;
+        sweep_options.min_triangulation_angle =
+            DEG2RAD(options_.min_triangulation_angle);
+        sweep_options.incident_angle_sigma = options_.incident_angle_sigma;
+        sweep_options.geom_consistency_regularizer =
+            options_.geom_consistency_regularizer;
+        sweep_options.geom_consistency_max_cost = options_.geom_consistency_max_cost;
+        sweep_options.filter_min_ncc = options_.filter_min_ncc;
+        sweep_options.filter_min_triangulation_angle =
+            DEG2RAD(options_.filter_min_triangulation_angle);
+        sweep_options.filter_min_num_consistent = options_.filter_min_num_consistent;
+        sweep_options.filter_geom_consistency_max_cost =
+            options_.filter_geom_consistency_max_cost;
+
+        for (int iter = 0; iter < options_.num_iterations; ++iter) {
+            CudaTimer iter_timer;
+
+            for (int sweep = 0; sweep < 4; ++sweep) {
+                CudaTimer sweep_timer;
+
+                // Expenentially reduce amount of perturbation during the optimization.
+                sweep_options.perturbation = 1.0f / std::pow(2.0f, iter + sweep / 4.0f);
+
+                // Linearly increase the influence of previous selection probabilities.
+                sweep_options.prev_sel_prob_weight =
+                    static_cast<float>(iter * 4 + sweep) / total_num_steps;
+
+                const bool last_sweep = iter == options_.num_iterations - 1 && sweep == 3;
+
+#define CALL_SWEEP_FUNC                                   /*\*/
+  /*SweepFromTopToBottom<kWindowSize,                       \
+                       kWindowStep,                       \
+                       kGeomConsistencyTerm,              \
+                       kFilterPhotoConsistency,           \
+                       kFilterGeomConsistency>            \
+      <<<sweep_grid_size_, sweep_block_size_>>>(          \
+          *global_workspace_,                             \
+          *rand_state_map_,                               \
+          *cost_map_,                                     \
+          *depth_map_,                                    \
+          *normal_map_,                                   \
+          *consistency_mask_,                             \
+          *sel_prob_map_,                                 \
+          *prev_sel_prob_map_,                            \
+          ref_image_texture_->GetObj(),                   \
+          *ref_image_->sum_image,                         \
+          *ref_image_->squared_sum_image,                 \
+          src_images_texture_->GetObj(),                  \
+          src_depth_maps_texture_ == nullptr              \
+              ? 0                                         \
+              : src_depth_maps_texture_->GetObj(),        \
+          poses_texture_[rotation_in_half_pi_]->GetObj(), \
+          sweep_options);*/
+
+                if (last_sweep) {
+                    if (options_.filter) {
+                        consistency_mask_.reset(new GpuMat<uint8_t>(cost_map_->GetWidth(),
+                            cost_map_->GetHeight(),
+                            cost_map_->GetDepth()));
+                        consistency_mask_->FillWithScalar(0);
+                    }
+                    if (options_.geom_consistency) {
+                        const bool kGeomConsistencyTerm = true;
+                        if (options_.filter) {
+                            const bool kFilterPhotoConsistency = true;
+                            const bool kFilterGeomConsistency = true;
+                            CALL_SWEEP_FUNC
+                        }
+                        else {
+                            const bool kFilterPhotoConsistency = false;
+                            const bool kFilterGeomConsistency = false;
+                            CALL_SWEEP_FUNC
+                        }
+                    }
+                    else {
+                        const bool kGeomConsistencyTerm = false;
+                        if (options_.filter) {
+                            const bool kFilterPhotoConsistency = true;
+                            const bool kFilterGeomConsistency = false;
+                            CALL_SWEEP_FUNC
+                        }
+                        else {
+                            const bool kFilterPhotoConsistency = false;
+                            const bool kFilterGeomConsistency = false;
+                            CALL_SWEEP_FUNC
+                        }
+                    }
+                }
+                else {
+                    const bool kFilterPhotoConsistency = false;
+                    const bool kFilterGeomConsistency = false;
+                    if (options_.geom_consistency) {
+                        const bool kGeomConsistencyTerm = true;
+                        CALL_SWEEP_FUNC
+                    }
+                    else {
+                        const bool kGeomConsistencyTerm = false;
+                        CALL_SWEEP_FUNC
+                    }
+                }
+
+#undef CALL_SWEEP_FUNC
+
+                CUDA_SYNC_AND_CHECK();
+
+                Rotate();
+
+                // Rotate selected image map.
+                if (last_sweep && options_.filter) {
+                    std::unique_ptr<GpuMat<uint8_t>> rot_consistency_mask_(
+                        new GpuMat<uint8_t>(cost_map_->GetWidth(),
+                            cost_map_->GetHeight(),
+                            cost_map_->GetDepth()));
+                    consistency_mask_->Rotate(rot_consistency_mask_.get());
+                    consistency_mask_.swap(rot_consistency_mask_);
+                }
+
+                sweep_timer.Print(" Sweep " + std::to_string(sweep + 1));
+            }
+
+            iter_timer.Print("Iteration " + std::to_string(iter + 1));
+        }
+
+        total_timer.Print("Total");
     }
 
     void CudaPatchMatch::Options::Print() const
