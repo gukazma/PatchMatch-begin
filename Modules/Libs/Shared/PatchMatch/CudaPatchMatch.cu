@@ -904,6 +904,31 @@ namespace GU
         float filter_geom_consistency_max_cost = 1.0f;
     };
 
+    template <int kWindowSize,
+        int kWindowStep,
+        bool kGeomConsistencyTerm = false,
+        bool kFilterPhotoConsistency = false,
+        bool kFilterGeomConsistency = false>
+    __global__ void SweepFromTopToBottom(
+        GpuMat<float> global_workspace,
+        GpuMat<curandState> rand_state_map,
+        GpuMat<float> cost_map,
+        GpuMat<float> depth_map,
+        GpuMat<float> normal_map,
+        GpuMat<uint8_t> consistency_mask,
+        GpuMat<float> sel_prob_map,
+        const GpuMat<float> prev_sel_prob_map,
+        const cudaTextureObject_t ref_image_texture,
+        const GpuMat<float> ref_sum_image,
+        const GpuMat<float> ref_squared_sum_image,
+        const cudaTextureObject_t src_images_texture,
+        const cudaTextureObject_t src_depth_maps_texture,
+        const cudaTextureObject_t poses_texture,
+        const SweepOptions options) 
+    {
+
+    }
+
     template <int kWindowSize, int kWindowStep>
     void CudaPatchMatch::RunWithWindowSizeAndStep() {
         // Wait for all initializations to finish.
@@ -965,8 +990,8 @@ namespace GU
 
                 const bool last_sweep = iter == options_.num_iterations - 1 && sweep == 3;
 
-#define CALL_SWEEP_FUNC                                   /*\*/
-  /*SweepFromTopToBottom<kWindowSize,                       \
+#define CALL_SWEEP_FUNC                                   \
+  SweepFromTopToBottom<kWindowSize,                       \
                        kWindowStep,                       \
                        kGeomConsistencyTerm,              \
                        kFilterPhotoConsistency,           \
@@ -988,7 +1013,7 @@ namespace GU
               ? 0                                         \
               : src_depth_maps_texture_->GetObj(),        \
           poses_texture_[rotation_in_half_pi_]->GetObj(), \
-          sweep_options);*/
+          sweep_options);
 
                 if (last_sweep) {
                     if (options_.filter) {
