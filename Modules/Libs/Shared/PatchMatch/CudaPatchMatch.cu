@@ -34,6 +34,22 @@ namespace GU
     // Calibration of reference image as {1/fx, -cx/fx, 1/fy, -cy/fy}.
     __constant__ float ref_inv_K[4];
 
+    __device__ inline void Mat33DotVec3(const float mat[9],
+        const float vec[3],
+        float result[3]) {
+        result[0] = mat[0] * vec[0] + mat[1] * vec[1] + mat[2] * vec[2];
+        result[1] = mat[3] * vec[0] + mat[4] * vec[1] + mat[5] * vec[2];
+        result[2] = mat[6] * vec[0] + mat[7] * vec[1] + mat[8] * vec[2];
+    }
+
+    __device__ inline void Mat33DotVec3Homogeneous(const float mat[9],
+        const float vec[2],
+        float result[2]) {
+        const float inv_z = 1.0f / (mat[6] * vec[0] + mat[7] * vec[1] + mat[8]);
+        result[0] = inv_z * (mat[0] * vec[0] + mat[1] * vec[1] + mat[2]);
+        result[1] = inv_z * (mat[3] * vec[0] + mat[4] * vec[1] + mat[5]);
+    }
+
     __device__ inline void ComposeHomography(
         const cudaTextureObject_t poses_texture,
         const int image_idx,
@@ -904,6 +920,147 @@ namespace GU
         float filter_geom_consistency_max_cost = 1.0f;
     };
 
+    class LikelihoodComputer {
+    public:
+        __device__ LikelihoodComputer(const float ncc_sigma,
+            const float min_triangulation_angle,
+            const float incident_angle_sigma)
+            : cos_min_triangulation_angle_(cos(min_triangulation_angle)),
+            inv_incident_angle_sigma_square_(
+                -0.5f / (incident_angle_sigma * incident_angle_sigma)),
+            inv_ncc_sigma_square_(-0.5f / (ncc_sigma * ncc_sigma)),
+            ncc_norm_factor_(ComputeNCCCostNormFactor(ncc_sigma)) {}
+
+        // Compute forward message from current cost and forward message of
+        // previous / neighboring pixel.
+        __device__ float ComputeForwardMessage(const float cost,
+            const float prev) const {
+            return ComputeMessage<true>(cost, prev);
+        }
+
+        // Compute backward message from current cost and backward message of
+        // previous / neighboring pixel.
+        __device__ float ComputeBackwardMessage(const float cost,
+            const float prev) const {
+            return ComputeMessage<false>(cost, prev);
+        }
+
+        // Compute the selection probability from the forward and backward message.
+        __device__ inline float ComputeSelProb(const float alpha,
+            const float beta,
+            const float prev,
+            const float prev_weight) const {
+            const float zn0 = (1.0f - alpha) * (1.0f - beta);
+            const float zn1 = alpha * beta;
+            const float curr = zn1 / (zn0 + zn1);
+            return prev_weight * prev + (1.0f - prev_weight) * curr;
+        }
+
+        // Compute NCC probability. Note that cost = 1 - NCC.
+        __device__ inline float ComputeNCCProb(const float cost) const {
+            return exp(cost * cost * inv_ncc_sigma_square_) * ncc_norm_factor_;
+        }
+
+        // Compute the triangulation angle probability.
+        __device__ inline float ComputeTriProb(
+            const float cos_triangulation_angle) const {
+            const float abs_cos_triangulation_angle = abs(cos_triangulation_angle);
+            if (abs_cos_triangulation_angle > cos_min_triangulation_angle_) {
+                const float scaled = 1.0f - (1.0f - abs_cos_triangulation_angle) /
+                    (1.0f - cos_min_triangulation_angle_);
+                const float likelihood = 1.0f - scaled * scaled;
+                return std::min(1.0f, std::max(0.0f, likelihood));
+            }
+            else {
+                return 1.0f;
+            }
+        }
+
+        // Compute the incident angle probability.
+        __device__ inline float ComputeIncProb(const float cos_incident_angle) const {
+            const float x = 1.0f - std::max(0.0f, cos_incident_angle);
+            return exp(x * x * inv_incident_angle_sigma_square_);
+        }
+
+        // Compute the warping/resolution prior probability.
+        template <int kWindowSize>
+        __device__ inline float ComputeResolutionProb(const float H[9],
+            const float row,
+            const float col) const {
+            const int kWindowRadius = kWindowSize / 2;
+
+            // Warp corners of patch in reference image to source image.
+            float src1[2];
+            const float ref1[2] = { col - kWindowRadius, row - kWindowRadius };
+            Mat33DotVec3Homogeneous(H, ref1, src1);
+            float src2[2];
+            const float ref2[2] = { col - kWindowRadius, row + kWindowRadius };
+            Mat33DotVec3Homogeneous(H, ref2, src2);
+            float src3[2];
+            const float ref3[2] = { col + kWindowRadius, row + kWindowRadius };
+            Mat33DotVec3Homogeneous(H, ref3, src3);
+            float src4[2];
+            const float ref4[2] = { col + kWindowRadius, row - kWindowRadius };
+            Mat33DotVec3Homogeneous(H, ref4, src4);
+
+            // Compute area of patches in reference and source image.
+            const float ref_area = kWindowSize * kWindowSize;
+            const float src_area =
+                abs(0.5f * (src1[0] * src2[1] - src2[0] * src1[1] - src1[0] * src4[1] +
+                    src2[0] * src3[1] - src3[0] * src2[1] + src4[0] * src1[1] +
+                    src3[0] * src4[1] - src4[0] * src3[1]));
+
+            if (ref_area > src_area) {
+                return src_area / ref_area;
+            }
+            else {
+                return ref_area / src_area;
+            }
+        }
+
+    private:
+        // The normalization for the likelihood function, i.e. the normalization for
+        // the prior on the matching cost.
+        __device__ static inline float ComputeNCCCostNormFactor(
+            const float ncc_sigma) {
+            // A = sqrt(2pi)*sigma/2*erf(sqrt(2)/sigma)
+            // erf(x) = 2/sqrt(pi) * integral from 0 to x of exp(-t^2) dt
+            return 2.0f / (sqrt(2.0f * M_PI) * ncc_sigma *
+                erff(2.0f / (ncc_sigma * 1.414213562f)));
+        }
+
+        // Compute the forward or backward message.
+        template <bool kForward>
+        __device__ inline float ComputeMessage(const float cost,
+            const float prev) const {
+            constexpr float kUniformProb = 0.5f;
+            constexpr float kNoChangeProb = 0.99999f;
+            const float kChangeProb = 1.0f - kNoChangeProb;
+            const float emission = ComputeNCCProb(cost);
+
+            float zn0;  // Message for selection probability = 0.
+            float zn1;  // Message for selection probability = 1.
+            if (kForward) {
+                zn0 = (prev * kChangeProb + (1.0f - prev) * kNoChangeProb) * kUniformProb;
+                zn1 = (prev * kNoChangeProb + (1.0f - prev) * kChangeProb) * emission;
+            }
+            else {
+                zn0 = prev * emission * kChangeProb +
+                    (1.0f - prev) * kUniformProb * kNoChangeProb;
+                zn1 = prev * emission * kNoChangeProb +
+                    (1.0f - prev) * kUniformProb * kChangeProb;
+            }
+
+            return zn1 / (zn0 + zn1);
+        }
+
+        const float cos_min_triangulation_angle_;
+        const float inv_incident_angle_sigma_square_;
+        const float inv_ncc_sigma_square_;
+        const float ncc_norm_factor_;
+    };
+
+
     template <int kWindowSize,
         int kWindowStep,
         bool kGeomConsistencyTerm = false,
@@ -926,7 +1083,14 @@ namespace GU
         const cudaTextureObject_t poses_texture,
         const SweepOptions options) 
     {
+        const int col = blockDim.x * blockIdx.x + threadIdx.x;
 
+        // Probability for boundary pixels.
+        constexpr float kUniformProb = 0.5f;
+
+        LikelihoodComputer likelihood_computer(options.ncc_sigma,
+            options.min_triangulation_angle,
+            options.incident_angle_sigma);
     }
 
     template <int kWindowSize, int kWindowStep>

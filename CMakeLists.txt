@@ -17,13 +17,10 @@ get_filename_component(ROOT_NAME ${CMAKE_SOURCE_DIR} NAME)
 message("Configure project: ${ROOT_NAME}")
 project(${ROOT_NAME} VERSION 0.1 LANGUAGES CXX CUDA)
 
-set(CMAKE_CUDA_FLAGS_RELWITHDEBINFO ${CMAKE_CUDA_FLAGS_RELWITHDEBINFO} "-g -G")
-set(CMAKE_CUDA_FLAGS_DEBUG ${CMAKE_CUDA_FLAGS_DEBUG} "-g -G")
-
 option(ENABLE_DOCS "Enable doxygen docs" ON)
 option(ENABLE_QTAPP "Enable config Qt app" OFF)
+option(ENABLE_CUDA_DEBUG "Enable cuda debug info" ON)
 
-# just for qt
 # set(CMAKE_AUTOUIC ON)
 # set(CMAKE_AUTOMOC ON)
 # set(CMAKE_AUTORCC ON)
@@ -38,6 +35,7 @@ set(CMAKE_RELEASE_POSTFIX "")
 # set(CMAKE_RUNTIME_OUTPUT_DIRECTORY_RELWITHDEBINFO ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
+set(CMAKE_CUDA_FLAGS "${CMAKE_CUDA_FLAGS} --expt-relaxed-constexpr")
 
 include(CMakeModules/doxygen.cmake)
 include(CMakeModules/dependency-graph.cmake)
